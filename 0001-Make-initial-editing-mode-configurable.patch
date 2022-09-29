@@ -1,0 +1,54 @@
+From 2ea1169d0d1acec6b8d7368cb79fbb776e1dfbc6 Mon Sep 17 00:00:00 2001
+From: j-james <jj@j-james.me>
+Date: Thu, 29 Sep 2022 16:17:52 -0700
+Subject: [PATCH] Make initial editing mode configurable
+
+---
+ book/src/configuration.md | 1 +
+ helix-view/src/editor.rs  | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/book/src/configuration.md b/book/src/configuration.md
+index fdabe768..a55e7d65 100644
+--- a/book/src/configuration.md
++++ b/book/src/configuration.md
+@@ -49,6 +49,7 @@ ### `[editor]` Section
+ | `auto-info` | Whether to display infoboxes | `true` |
+ | `true-color` | Set to `true` to override automatic detection of terminal truecolor support in the event of a false negative. | `false` |
+ | `rulers` | List of column positions at which to display the rulers. Can be overridden by language specific `rulers` in `languages.toml` file. | `[]` |
++| `initial-mode` | The initial mode for newly opened editors. | `"normal"` |
+ | `bufferline` | Renders a line at the top of the editor displaying open buffers. Can be `always`, `never` or `multiple` (only shown if more than one buffer is in use) | `never` |
+ | `color-modes` | Whether to color the mode indicator with different colors depending on the mode itself | `false` |
+ 
+diff --git a/helix-view/src/editor.rs b/helix-view/src/editor.rs
+index 5eff9983..331b17b9 100644
+--- a/helix-view/src/editor.rs
++++ b/helix-view/src/editor.rs
+@@ -166,6 +166,8 @@ pub struct Config {
+     pub bufferline: BufferLine,
+     /// Vertical indent width guides.
+     pub indent_guides: IndentGuidesConfig,
++    /// The initial mode for newly opened editors. Defaults to `"normal"`.
++    pub initial_mode: Mode,
+     /// Whether to color modes with different colors. Defaults to `false`.
+     pub color_modes: bool,
+ }
+@@ -576,6 +578,7 @@ fn default() -> Self {
+             whitespace: WhitespaceConfig::default(),
+             bufferline: BufferLine::default(),
+             indent_guides: IndentGuidesConfig::default(),
++            initial_mode: Mode::Normal,
+             color_modes: false,
+         }
+     }
+@@ -993,6 +996,7 @@ pub fn switch(&mut self, id: DocumentId, action: Action) {
+ 
+     /// Generate an id for a new document and register it.
+     fn new_document(&mut self, mut doc: Document) -> DocumentId {
++        self.mode = self.config().initial_mode;
+         let id = self.next_document_id;
+         // Safety: adding 1 from 1 is fine, probably impossible to reach usize max
+         self.next_document_id =
+-- 
+2.37.3
+
