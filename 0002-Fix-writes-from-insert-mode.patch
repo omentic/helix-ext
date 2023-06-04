@@ -1,0 +1,60 @@
+From 9c4369da34bbbb1a6d26ba35be41739f36fb722b Mon Sep 17 00:00:00 2001
+From: JJ <git@toki.la>
+Date: Sat, 3 Jun 2023 23:03:58 -0700
+Subject: [PATCH 1/2] Fix writes from insert mode not properly updating the
+ revision history
+
+---
+ helix-term/src/commands/typed.rs | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/helix-term/src/commands/typed.rs b/helix-term/src/commands/typed.rs
+index 706442e4..8e043385 100644
+--- a/helix-term/src/commands/typed.rs
++++ b/helix-term/src/commands/typed.rs
+@@ -350,6 +350,8 @@ fn write_impl(
+         None
+     };
+ 
++    doc.append_changes_to_history(view);
++
+     if fmt.is_none() {
+         let id = doc.id();
+         cx.editor.save(id, path, force)?;
+-- 
+2.41.0
+
+
+From e2a877432ce7f75eba60d5dd579e5a0ab45b73e8 Mon Sep 17 00:00:00 2001
+From: JJ <git@toki.la>
+Date: Sat, 3 Jun 2023 23:06:02 -0700
+Subject: [PATCH 2/2] Write pre-manipulation pastes to the revision history
+
+---
+ helix-term/src/ui/editor.rs | 8 +-------
+ 1 file changed, 1 insertion(+), 7 deletions(-)
+
+diff --git a/helix-term/src/ui/editor.rs b/helix-term/src/ui/editor.rs
+index 43b5d1af..ef4299b4 100644
+--- a/helix-term/src/ui/editor.rs
++++ b/helix-term/src/ui/editor.rs
+@@ -1235,15 +1235,9 @@ fn handle_event(
+                 cx.editor.count = None;
+ 
+                 let config = cx.editor.config();
+-                let mode = cx.editor.mode();
+                 let (view, doc) = current!(cx.editor);
+                 view.ensure_cursor_in_view(doc, config.scrolloff);
+-
+-                // Store a history state if not in insert mode. Otherwise wait till we exit insert
+-                // to include any edits to the paste in the history state.
+-                if mode != Mode::Insert {
+-                    doc.append_changes_to_history(view);
+-                }
++                doc.append_changes_to_history(view);
+ 
+                 EventResult::Consumed(None)
+             }
+-- 
+2.41.0
+
