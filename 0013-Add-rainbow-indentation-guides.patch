@@ -1,0 +1,190 @@
+From 35f26da37440f8729982f9ee543a5bb24ad276a2 Mon Sep 17 00:00:00 2001
+From: JJ <git@toki.la>
+Date: Sat, 15 Jul 2023 19:17:27 -0700
+Subject: [PATCH] Add rainbow indentation guides
+
+ref: https://github.com/helix-editor/helix/pull/4493
+---
+ book/src/configuration.md     | 12 +++++-----
+ helix-term/src/ui/document.rs | 42 ++++++++++++++++++++++++++---------
+ helix-view/src/editor.rs      | 10 +++++++++
+ helix-view/src/theme.rs       |  4 ++++
+ 4 files changed, 53 insertions(+), 15 deletions(-)
+
+diff --git a/book/src/configuration.md b/book/src/configuration.md
+index 32a4aac4..6609c30e 100644
+--- a/book/src/configuration.md
++++ b/book/src/configuration.md
+@@ -261,11 +261,12 @@ ### `[editor.indent-guides]` Section
+ 
+ Options for rendering vertical indent guides.
+ 
+-| Key           | Description                                             | Default |
+-| ---           | ---                                                     | ---     |
+-| `render`      | Whether to render indent guides                         | `false` |
+-| `character`   | Literal character to use for rendering the indent guide | `│`     |
+-| `skip-levels` | Number of indent levels to skip                         | `0`     |
++| Key           | Description                                                             | Default |
++| ---           | ---                                                                     | ---     |
++| `render`      | Whether to render indent indent-guides                                  | `false` |
++| `character`   | Literal character to use for rendering the indent guide                 | `│`     |
++| `skip-levels` | Number of indent levels to skip                                         | `0`     |
++| `rainbow-option` | Enum to set rainbow indentations. Options: `normal`, `dim` and `none`| `none`  |
+ 
+ Example:
+ 
+@@ -274,6 +275,7 @@ ### `[editor.indent-guides]` Section
+ render = true
+ character = "╎" # Some characters that work well: "▏", "┆", "┊", "⸽"
+ skip-levels = 1
++rainbow-option = "normal"
+ ```
+ 
+ ### `[editor.gutters]` Section
+diff --git a/helix-term/src/ui/document.rs b/helix-term/src/ui/document.rs
+index 80da1c54..f406a6f9 100644
+--- a/helix-term/src/ui/document.rs
++++ b/helix-term/src/ui/document.rs
+@@ -7,9 +7,9 @@
+ use helix_core::syntax::HighlightEvent;
+ use helix_core::text_annotations::TextAnnotations;
+ use helix_core::{visual_offset_from_block, Position, RopeSlice};
+-use helix_view::editor::{WhitespaceConfig, WhitespaceRenderValue};
++use helix_view::editor::{RainbowIndentOptions, WhitespaceConfig, WhitespaceRenderValue};
+ use helix_view::graphics::Rect;
+-use helix_view::theme::Style;
++use helix_view::theme::{Modifier, Style};
+ use helix_view::view::ViewPosition;
+ use helix_view::Document;
+ use helix_view::Theme;
+@@ -310,6 +310,8 @@ pub struct TextRenderer<'a> {
+     pub whitespace_style: Style,
+     pub indent_guide_char: String,
+     pub indent_guide_style: Style,
++    pub indent_guide_rainbow: RainbowIndentOptions,
++    pub theme: &'a Theme,
+     pub newline: String,
+     pub nbsp: String,
+     pub space: String,
+@@ -326,7 +328,7 @@ impl<'a> TextRenderer<'a> {
+     pub fn new(
+         surface: &'a mut Surface,
+         doc: &Document,
+-        theme: &Theme,
++        theme: &'a Theme,
+         col_offset: usize,
+         viewport: Rect,
+     ) -> TextRenderer<'a> {
+@@ -363,12 +365,19 @@ pub fn new(
+         };
+ 
+         let text_style = theme.get("ui.text");
++        let basic_style = text_style.patch(
++            theme
++                .try_get("ui.virtual.indent-guide")
++                .unwrap_or_else(|| theme.get("ui.virtual.whitespace")),
++        );
+ 
+         let indent_width = doc.indent_style.indent_width(tab_width) as u16;
+ 
+         TextRenderer {
+             surface,
+             indent_guide_char: editor_config.indent_guides.character.into(),
++            indent_guide_rainbow: editor_config.indent_guides.rainbow_option.clone(),
++            theme,
+             newline,
+             nbsp,
+             space,
+@@ -379,11 +388,7 @@ pub fn new(
+             starting_indent: col_offset / indent_width as usize
+                 + (col_offset % indent_width as usize != 0) as usize
+                 + editor_config.indent_guides.skip_levels as usize,
+-            indent_guide_style: text_style.patch(
+-                theme
+-                    .try_get("ui.virtual.indent-guide")
+-                    .unwrap_or_else(|| theme.get("ui.virtual.whitespace")),
+-            ),
++            indent_guide_style: basic_style,
+             text_style,
+             draw_indent_guides: editor_config.indent_guides.render,
+             viewport,
+@@ -477,8 +482,25 @@ pub fn draw_indent_guides(&mut self, indent_level: usize, row: u16) {
+                 as u16;
+             let y = self.viewport.y + row;
+             debug_assert!(self.surface.in_bounds(x, y));
+-            self.surface
+-                .set_string(x, y, &self.indent_guide_char, self.indent_guide_style);
++            match self.indent_guide_rainbow {
++                RainbowIndentOptions::None => {
++                    self.surface
++                        .set_string(x, y, &self.indent_guide_char, self.indent_guide_style)
++                }
++                RainbowIndentOptions::Dim => {
++                    let new_style = self
++                        .indent_guide_style
++                        .patch(self.theme.get_rainbow(i))
++                        .add_modifier(Modifier::DIM);
++                    self.surface
++                        .set_string(x, y, &self.indent_guide_char, new_style);
++                }
++                RainbowIndentOptions::Normal => {
++                    let new_style = self.indent_guide_style.patch(self.theme.get_rainbow(i));
++                    self.surface
++                        .set_string(x, y, &self.indent_guide_char, new_style);
++                }
++            };
+         }
+     }
+ }
+diff --git a/helix-view/src/editor.rs b/helix-view/src/editor.rs
+index c0410f7d..543c7bde 100644
+--- a/helix-view/src/editor.rs
++++ b/helix-view/src/editor.rs
+@@ -743,12 +743,21 @@ fn default() -> Self {
+     }
+ }
+ 
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "kebab-case")]
++pub enum RainbowIndentOptions {
++    None,
++    Dim,
++    Normal,
++}
++
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(default, rename_all = "kebab-case")]
+ pub struct IndentGuidesConfig {
+     pub render: bool,
+     pub character: char,
+     pub skip_levels: u8,
++    pub rainbow_option: RainbowIndentOptions,
+ }
+ 
+ impl Default for IndentGuidesConfig {
+@@ -757,6 +766,7 @@ fn default() -> Self {
+             skip_levels: 0,
+             render: false,
+             character: '│',
++            rainbow_option: RainbowIndentOptions::None,
+         }
+     }
+ }
+diff --git a/helix-view/src/theme.rs b/helix-view/src/theme.rs
+index 2b024384..25b0f197 100644
+--- a/helix-view/src/theme.rs
++++ b/helix-view/src/theme.rs
+@@ -378,6 +378,10 @@ pub fn is_16_color(&self) -> bool {
+     pub fn rainbow_length(&self) -> usize {
+         self.rainbow_length
+     }
++
++    pub fn get_rainbow(&self, index: usize) -> Style {
++        self.highlights[index % self.rainbow_length]
++    }
+ }
+ 
+ fn default_rainbow() -> Vec<Style> {
+-- 
+2.41.0
+

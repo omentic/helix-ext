@@ -1,30 +1,31 @@
-From 2ea1169d0d1acec6b8d7368cb79fbb776e1dfbc6 Mon Sep 17 00:00:00 2001
-From: j-james <jj@j-james.me>
-Date: Thu, 29 Sep 2022 16:17:52 -0700
-Subject: [PATCH] Make initial editing mode configurable
+From d3ce6c32f4b4957759209ee6cb215e7968c343e8 Mon Sep 17 00:00:00 2001
+From: JJ <git@toki.la>
+Date: Sat, 15 Jul 2023 17:40:45 -0700
+Subject: [PATCH 1/2] Make initial editing mode configurable
 
+ref: https://github.com/helix-editor/helix/pull/3366
 ---
  book/src/configuration.md | 1 +
  helix-view/src/editor.rs  | 4 ++++
  2 files changed, 5 insertions(+)
 
 diff --git a/book/src/configuration.md b/book/src/configuration.md
-index fdabe768..a55e7d65 100644
+index 1b94ae85..b69bb486 100644
 --- a/book/src/configuration.md
 +++ b/book/src/configuration.md
-@@ -49,6 +49,7 @@ ### `[editor]` Section
- | `auto-info` | Whether to display infoboxes | `true` |
- | `true-color` | Set to `true` to override automatic detection of terminal truecolor support in the event of a false negative. | `false` |
- | `rulers` | List of column positions at which to display the rulers. Can be overridden by language specific `rulers` in `languages.toml` file. | `[]` |
+@@ -59,6 +59,7 @@ ### `[editor]` Section
+ | `true-color` | Set to `true` to override automatic detection of terminal truecolor support in the event of a false negative | `false` |
+ | `undercurl` | Set to `true` to override automatic detection of terminal undercurl support in the event of a false negative | `false` |
+ | `rulers` | List of column positions at which to display the rulers. Can be overridden by language specific `rulers` in `languages.toml` file | `[]` |
 +| `initial-mode` | The initial mode for newly opened editors. | `"normal"` |
  | `bufferline` | Renders a line at the top of the editor displaying open buffers. Can be `always`, `never` or `multiple` (only shown if more than one buffer is in use) | `never` |
  | `color-modes` | Whether to color the mode indicator with different colors depending on the mode itself | `false` |
- 
+ | `text-width` | Maximum line length. Used for the `:reflow` command and soft-wrapping if `soft-wrap.wrap-at-text-width` is set | `80` |
 diff --git a/helix-view/src/editor.rs b/helix-view/src/editor.rs
-index 5eff9983..331b17b9 100644
+index affe87dd..3c00a61e 100644
 --- a/helix-view/src/editor.rs
 +++ b/helix-view/src/editor.rs
-@@ -166,6 +166,8 @@ pub struct Config {
+@@ -281,6 +281,8 @@ pub struct Config {
      pub bufferline: BufferLine,
      /// Vertical indent width guides.
      pub indent_guides: IndentGuidesConfig,
@@ -32,16 +33,16 @@ index 5eff9983..331b17b9 100644
 +    pub initial_mode: Mode,
      /// Whether to color modes with different colors. Defaults to `false`.
      pub color_modes: bool,
- }
-@@ -576,6 +578,7 @@ fn default() -> Self {
+     pub soft_wrap: SoftWrap,
+@@ -812,6 +814,7 @@ fn default() -> Self {
              whitespace: WhitespaceConfig::default(),
              bufferline: BufferLine::default(),
              indent_guides: IndentGuidesConfig::default(),
 +            initial_mode: Mode::Normal,
              color_modes: false,
-         }
-     }
-@@ -993,6 +996,7 @@ pub fn switch(&mut self, id: DocumentId, action: Action) {
+             soft_wrap: SoftWrap {
+                 enable: Some(false),
+@@ -1363,6 +1366,7 @@ pub fn switch(&mut self, id: DocumentId, action: Action) {
  
      /// Generate an id for a new document and register it.
      fn new_document(&mut self, mut doc: Document) -> DocumentId {
@@ -50,5 +51,32 @@ index 5eff9983..331b17b9 100644
          // Safety: adding 1 from 1 is fine, probably impossible to reach usize max
          self.next_document_id =
 -- 
-2.37.3
+2.41.0
+
+
+From 96f81b33f6a1380a4acb5b3ca379e30a0fd29e48 Mon Sep 17 00:00:00 2001
+From: JJ <git@toki.la>
+Date: Sat, 15 Jul 2023 23:40:55 -0700
+Subject: [PATCH 2/2] bandaid for enter_normal_mode panicking upon launch
+
+---
+ helix-view/src/editor.rs | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/helix-view/src/editor.rs b/helix-view/src/editor.rs
+index 5fce5446..1d1f6bf7 100644
+--- a/helix-view/src/editor.rs
++++ b/helix-view/src/editor.rs
+@@ -1332,7 +1332,8 @@ pub fn switch(&mut self, id: DocumentId, action: Action) {
+             return;
+         }
+ 
+-        self.enter_normal_mode();
++        // panics upon launch. todo: debug
++        // self.enter_normal_mode();
+ 
+         match action {
+             Action::Replace => {
+-- 
+2.41.0
 

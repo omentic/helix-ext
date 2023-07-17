@@ -1,0 +1,106 @@
+From 45258008f5fce264d2c6abcad4e224c3d236c267 Mon Sep 17 00:00:00 2001
+From: JJ <git@toki.la>
+Date: Sat, 15 Jul 2023 19:31:25 -0700
+Subject: [PATCH] Add unbind-default-keys config option
+
+ref: https://github.com/helix-editor/helix/pull/2733
+---
+ book/src/remapping.md    | 19 +++++++++++++++++++
+ helix-term/src/config.rs | 12 ++++++++++--
+ helix-term/src/keymap.rs |  7 +++++--
+ 3 files changed, 34 insertions(+), 4 deletions(-)
+
+diff --git a/book/src/remapping.md b/book/src/remapping.md
+index d762c6ad..cc27eed7 100644
+--- a/book/src/remapping.md
++++ b/book/src/remapping.md
+@@ -75,5 +75,24 @@ ## Special keys and modifiers
+ 
+ Keys can be disabled by binding them to the `no_op` command.
+ 
++
++To remove all default bindings, `unbind-default-keys = true` can be added to the top level configuration.
++
++```toml
++unbind-default-keys = true
++
++# Only these normal mode bindings will be used
++[keys.normal]
++n = "normal_mode"
++t = "goto_definition"
++
++# remember to add bindings to return to normal mode
++[keys.select]
++esc = "normal_mode"
++
++[keys.insert]
++esc = "normal_mode"
++```
++
+ A list of commands is available in the [Keymap](https://docs.helix-editor.com/keymap.html) documentation
+  and in the source code at [`helix-term/src/commands.rs`](https://github.com/helix-editor/helix/blob/master/helix-term/src/commands.rs) at the invocation of `static_commands!` macro and the `TypableCommandList`.
+diff --git a/helix-term/src/config.rs b/helix-term/src/config.rs
+index f37b03ec..aa59dc8d 100644
+--- a/helix-term/src/config.rs
++++ b/helix-term/src/config.rs
+@@ -20,6 +20,8 @@ pub struct Config {
+ #[serde(deny_unknown_fields)]
+ pub struct ConfigRaw {
+     pub theme: Option<String>,
++    #[serde(default)]
++    pub unbind_default_keys: bool,
+     pub keys: Option<HashMap<Mode, KeyTrie>>,
+     pub editor: Option<toml::Value>,
+ }
+@@ -66,7 +68,10 @@ pub fn load(
+             local.and_then(|file| toml::from_str(&file).map_err(ConfigLoadError::BadConfig));
+         let res = match (global_config, local_config) {
+             (Ok(global), Ok(local)) => {
+-                let mut keys = keymap::default();
++                let mut keys = match local.unbind_default_keys {
++                    true => HashMap::default(),
++                    false => keymap::default(),
++                };
+                 if let Some(global_keys) = global.keys {
+                     merge_keys(&mut keys, global_keys)
+                 }
+@@ -96,7 +101,10 @@ pub fn load(
+                 return Err(ConfigLoadError::BadConfig(err))
+             }
+             (Ok(config), Err(_)) | (Err(_), Ok(config)) => {
+-                let mut keys = keymap::default();
++                let mut keys = match config.unbind_default_keys {
++                    true => HashMap::default(),
++                    false => keymap::default(),
++                };
+                 if let Some(keymap) = config.keys {
+                     merge_keys(&mut keys, keymap);
+                 }
+diff --git a/helix-term/src/keymap.rs b/helix-term/src/keymap.rs
+index 5a72a35a..8cb6ddf8 100644
+--- a/helix-term/src/keymap.rs
++++ b/helix-term/src/keymap.rs
+@@ -309,7 +309,10 @@ pub fn sticky(&self) -> Option<&KeyTrieNode> {
+     pub fn get(&mut self, mode: Mode, key: KeyEvent) -> KeymapResult {
+         // TODO: remove the sticky part and look up manually
+         let keymaps = &*self.map();
+-        let keymap = &keymaps[&mode];
++        let keymap = match keymaps.get(&mode) {
++            Some(keymap) => keymap,
++            None => return KeymapResult::NotFound,
++        };
+ 
+         if key!(Esc) == key {
+             if !self.state.is_empty() {
+@@ -364,7 +367,7 @@ fn default() -> Self {
+     }
+ }
+ 
+-/// Merge default config keys with user overwritten keys for custom user config.
++/// Merge existing config keys with user overwritten keys.
+ pub fn merge_keys(dst: &mut HashMap<Mode, KeyTrie>, mut delta: HashMap<Mode, KeyTrie>) {
+     for (mode, keys) in dst {
+         keys.merge_nodes(
+-- 
+2.41.0
+

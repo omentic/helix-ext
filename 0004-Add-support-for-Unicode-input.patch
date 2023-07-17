@@ -1,0 +1,612 @@
+From 9a032b407260c8bd685b42da300d13afffb12d94 Mon Sep 17 00:00:00 2001
+From: JJ <git@toki.la>
+Date: Sat, 15 Jul 2023 22:10:15 -0700
+Subject: [PATCH] Add support for digraphs
+
+ref: https://github.com/helix-editor/helix/pull/2852
+---
+ book/src/configuration.md        |  12 +
+ book/src/keymap.md               |   1 +
+ helix-term/src/commands.rs       |  48 ++++
+ helix-term/src/keymap/default.rs |   2 +
+ helix-view/src/digraph.rs        | 437 +++++++++++++++++++++++++++++++
+ helix-view/src/editor.rs         |   4 +
+ helix-view/src/lib.rs            |   1 +
+ 7 files changed, 505 insertions(+)
+ create mode 100644 helix-view/src/digraph.rs
+
+diff --git a/book/src/configuration.md b/book/src/configuration.md
+index 6609c30e..0af686f4 100644
+--- a/book/src/configuration.md
++++ b/book/src/configuration.md
+@@ -360,3 +360,15 @@ ### `[editor.explorer]` Section
+ | -------------- | ------------------------------------------- | ------- |
+ | `column-width` | explorer side width                         | 30      |
+ | `position`     | explorer widget position, `left` or `right` | `left`  |
++
++### `[editor.digraphs]` Section
++
++By default, special characters can be input using the `insert_digraphs` command, bound to `\` in normal mode.
++Custom digraphs can be added to the `editor.digraphs` section of the config.
++
++```toml
++[editor.digraphs]
++ka = "か"
++ku = { symbols = "く", description = "The japanese character Ku" }
++shrug = "¯\\_(ツ)_/¯"
++```
+diff --git a/book/src/keymap.md b/book/src/keymap.md
+index 4e6e878d..11ad358a 100644
+--- a/book/src/keymap.md
++++ b/book/src/keymap.md
+@@ -72,6 +72,7 @@ ### Changes
+ | `a`         | Insert after selection (append)                                      | `append_mode`             |
+ | `I`         | Insert at the start of the line                                      | `insert_at_line_start`    |
+ | `A`         | Insert at the end of the line                                        | `insert_at_line_end`      |
++| `\`         | Insert digraphs                                                      | `insert_digraph`          |
+ | `o`         | Open new line below selection                                        | `open_below`              |
+ | `O`         | Open new line above selection                                        | `open_above`              |
+ | `.`         | Repeat last insert                                                   | N/A                       |
+diff --git a/helix-term/src/commands.rs b/helix-term/src/commands.rs
+index edeb419b..771c73bc 100644
+--- a/helix-term/src/commands.rs
++++ b/helix-term/src/commands.rs
+@@ -490,6 +490,7 @@ pub fn doc(&self) -> &str {
+         command_palette, "Open command palette",
+         open_or_focus_explorer, "Open or focus explorer",
+         reveal_current_file, "Reveal current file in explorer",
++        insert_digraph, "Insert Unicode characters with prompt",
+     );
+ }
+ 
+@@ -5901,3 +5902,50 @@ fn replay_macro(cx: &mut Context) {
+         cx.editor.macro_replaying.pop();
+     }));
+ }
++
++fn insert_digraph(cx: &mut Context) {
++    ui::prompt(
++        cx,
++        "digraph:".into(),
++        Some('K'), // todo: decide on register to use
++        move |editor, input| {
++            editor
++                .config()
++                .digraphs
++                .search(input)
++                .take(10)
++                .map(|entry| {
++                    // todo: Prompt does not currently allow additional text as part
++                    // of it's suggestions. Show the user the symbol and description
++                    // once prompt has been made more robust
++                    #[allow(clippy::useless_format)]
++                    ((0..), Cow::from(format!("{}", entry.sequence)))
++                })
++                .collect()
++        },
++        move |cx, input, event| {
++            match event {
++                PromptEvent::Validate => (),
++                _ => return,
++            }
++            let config = cx.editor.config();
++            let symbols = if let Some(entry) = config.digraphs.get(input) {
++                &entry.symbols
++            } else {
++                cx.editor.set_error("Digraph not found");
++                return;
++            };
++
++            let (view, doc) = current!(cx.editor);
++            let selection = doc.selection(view.id);
++            let mut changes = Vec::with_capacity(selection.len());
++
++            for range in selection.ranges() {
++                changes.push((range.from(), range.from(), Some(symbols.clone().into())));
++            }
++            let trans = Transaction::change(doc.text(), changes.into_iter());
++            doc.apply(&trans, view.id);
++            doc.append_changes_to_history(view);
++        },
++    )
++}
+diff --git a/helix-term/src/keymap/default.rs b/helix-term/src/keymap/default.rs
+index 43d101fe..9702c627 100644
+--- a/helix-term/src/keymap/default.rs
++++ b/helix-term/src/keymap/default.rs
+@@ -135,6 +135,8 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
+         "N" => search_prev,
+         "*" => search_selection,
+ 
++        "\\" => insert_digraph,
++
+         "u" => undo,
+         "U" => redo,
+         "A-u" => earlier,
+diff --git a/helix-view/src/digraph.rs b/helix-view/src/digraph.rs
+new file mode 100644
+index 00000000..86333333
+--- /dev/null
++++ b/helix-view/src/digraph.rs
+@@ -0,0 +1,437 @@
++use anyhow::Result;
++use serde::{ser::SerializeMap, Deserialize, Serialize};
++use std::collections::HashMap;
++
++// Errors
++#[derive(PartialEq, Eq, Debug, Clone)]
++pub enum Error {
++    EmptyInput(String),
++    DuplicateEntry {
++        seq: String,
++        current: String,
++        existing: String,
++    },
++    Custom(String),
++}
++
++impl serde::de::Error for Error {
++    fn custom<T>(msg: T) -> Self
++    where
++        T: std::fmt::Display,
++    {
++        Error::Custom(msg.to_string())
++    }
++}
++
++impl std::fmt::Display for Error {
++    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
++        match self {
++            Error::EmptyInput(s) => {
++                f.write_str(&format!("No symbols were given for key sequence {}", s))
++            }
++            Error::DuplicateEntry {
++                seq,
++                current,
++                existing,
++            } => f.write_str(&format!(
++                "Attempted to bind {} to symbols ({}) when already bound to ({})",
++                seq, current, existing
++            )),
++            Error::Custom(s) => f.write_str(s),
++        }
++    }
++}
++
++impl std::error::Error for Error {}
++
++/// Trie implementation for storing and searching input
++/// strings -> unicode characters defined by the user.
++#[derive(Default, Debug, Clone, PartialEq, Eq)]
++pub struct DigraphStore {
++    head: DigraphNode,
++}
++
++#[derive(Default, Debug, Clone, PartialEq, Eq)]
++struct DigraphNode {
++    output: Option<FullDigraphEntry>,
++    children: Option<HashMap<char, DigraphNode>>,
++}
++
++#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++pub struct DigraphEntry {
++    pub symbols: String,
++    pub description: Option<String>,
++}
++
++#[derive(Default, Debug, Clone, PartialEq, Eq)]
++pub struct FullDigraphEntry {
++    pub sequence: String,
++    pub symbols: String,
++    pub description: Option<String>,
++}
++
++impl<'de> Deserialize<'de> for DigraphStore {
++    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
++    where
++        D: serde::Deserializer<'de>,
++    {
++        #[derive(Deserialize)]
++        #[serde(untagged)]
++        enum EntryDef {
++            Full(DigraphEntry),
++            Symbols(String),
++        }
++
++        let mut store = Self::default();
++        HashMap::<String, EntryDef>::deserialize(deserializer)?
++            .into_iter()
++            .map(|(k, d)| match d {
++                EntryDef::Symbols(symbols) => (
++                    k,
++                    DigraphEntry {
++                        symbols,
++                        description: None,
++                    },
++                ),
++                EntryDef::Full(entry) => (k, entry),
++            })
++            .try_for_each(|(k, v)| store.insert(&k, v))
++            .map_err(serde::de::Error::custom)?;
++
++        Ok(store)
++    }
++}
++
++impl Serialize for DigraphStore {
++    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
++    where
++        S: serde::Serializer,
++    {
++        let mut m = serializer.serialize_map(None)?;
++
++        self.search("").try_for_each(|entry| {
++            m.serialize_entry(
++                &entry.sequence,
++                &DigraphEntry {
++                    symbols: entry.symbols.clone(),
++                    description: entry.description.clone(),
++                },
++            )
++        })?;
++        m.end()
++    }
++}
++
++/// A Store of input -> unicode strings that can be quickly looked up and
++/// searched.
++impl DigraphStore {
++    /// Inserts a new unicode string into the store
++    pub fn insert(&mut self, input_seq: &str, entry: DigraphEntry) -> Result<(), Error> {
++        if input_seq.is_empty() {
++            return Err(Error::EmptyInput(input_seq.to_string()));
++        }
++
++        self.head.insert(
++            input_seq,
++            FullDigraphEntry {
++                sequence: input_seq.to_string(),
++                symbols: entry.symbols,
++                description: entry.description,
++            },
++        )
++    }
++
++    /// Attempts to retrieve a stored unicode string if it exists
++    pub fn get(&self, exact_seq: &str) -> Option<&FullDigraphEntry> {
++        self.head.get(exact_seq).and_then(|n| n.output.as_ref())
++    }
++
++    /// Returns an iterator of closest matches to the input string
++    pub fn search(&self, input_seq: &str) -> impl Iterator<Item = &FullDigraphEntry> {
++        self.head.get(input_seq).into_iter().flat_map(|x| x.iter())
++    }
++}
++
++impl DigraphNode {
++    fn insert(&mut self, input_seq: &str, entry: FullDigraphEntry) -> Result<(), Error> {
++        // see if we found the spot to insert our unicode
++        if input_seq.is_empty() {
++            if let Some(existing) = &self.output {
++                return Err(Error::DuplicateEntry {
++                    seq: entry.sequence,
++                    existing: existing.symbols.clone(),
++                    current: entry.symbols,
++                });
++            } else {
++                self.output = Some(entry);
++                return Ok(());
++            }
++        }
++
++        // continue searching
++        let node = self
++            .children
++            .get_or_insert(Default::default())
++            .entry(input_seq.chars().next().unwrap())
++            .or_default();
++
++        node.insert(&input_seq[1..], entry)
++    }
++
++    fn get(&self, exact_seq: &str) -> Option<&Self> {
++        if exact_seq.is_empty() {
++            return Some(self);
++        }
++
++        self.children
++            .as_ref()
++            .and_then(|cm| cm.get(&exact_seq.chars().next().unwrap()))
++            .and_then(|node| node.get(&exact_seq[1..]))
++    }
++
++    fn iter<'a>(&'a self) -> impl Iterator<Item = &FullDigraphEntry> + 'a {
++        DigraphIter::new(self)
++    }
++}
++
++pub struct DigraphIter<'a, 'b>
++where
++    'a: 'b,
++{
++    element_iter: Box<dyn Iterator<Item = &'a FullDigraphEntry> + 'b>,
++    node_iter: Box<dyn Iterator<Item = &'a DigraphNode> + 'b>,
++}
++
++impl<'a, 'b> DigraphIter<'a, 'b>
++where
++    'a: 'b,
++{
++    fn new(node: &'a DigraphNode) -> Self {
++        // do a lazy breadth-first search by keeping track of the next 'rung' of
++        // elements to produce, and the next 'rung' of nodes to refill the element
++        // iterator when empty
++        Self {
++            element_iter: Box::new(node.output.iter().chain(Self::get_child_elements(node))),
++            node_iter: Box::new(Self::get_child_nodes(node)),
++        }
++    }
++
++    fn get_child_elements(
++        node: &'a DigraphNode,
++    ) -> impl Iterator<Item = &'a FullDigraphEntry> + 'b {
++        node.children
++            .iter()
++            .flat_map(|hm| hm.iter())
++            .flat_map(|(_, node)| node.output.as_ref())
++    }
++
++    fn get_child_nodes(node: &'a DigraphNode) -> impl Iterator<Item = &'a DigraphNode> + 'b {
++        node.children
++            .iter()
++            .flat_map(|x| x.iter().map(|(_, node)| node))
++    }
++}
++impl<'a, 'b> Iterator for DigraphIter<'a, 'b>
++where
++    'a: 'b,
++{
++    type Item = &'a FullDigraphEntry;
++
++    fn next(&mut self) -> Option<Self::Item> {
++        loop {
++            if let Some(e) = self.element_iter.next() {
++                return Some(e);
++            }
++
++            // We ran out of elements, fetch more by traversing the next rung of nodes
++            match self.node_iter.next() {
++                Some(node) => {
++                    // todo: figure out a better way to update self's nodes
++                    let mut new_nodes: Box<dyn Iterator<Item = &DigraphNode>> =
++                        Box::new(std::iter::empty());
++                    std::mem::swap(&mut new_nodes, &mut self.node_iter);
++                    let mut new_nodes: Box<dyn Iterator<Item = &DigraphNode>> =
++                        Box::new(new_nodes.chain(Self::get_child_nodes(node)));
++                    std::mem::swap(&mut new_nodes, &mut self.node_iter);
++
++                    self.element_iter = Box::new(Self::get_child_elements(node));
++                }
++                None => return None,
++            }
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn digraph_insert() {
++        let mut dg = DigraphStore::default();
++        dg.insert(
++            "abc",
++            DigraphEntry {
++                symbols: "testbug".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++
++        dg.insert(
++            "abd",
++            DigraphEntry {
++                symbols: "deadbeef".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++
++        assert_eq!(
++            dg.head
++                .children
++                .as_ref()
++                .unwrap()
++                .get(&'a')
++                .unwrap()
++                .children
++                .as_ref()
++                .unwrap()
++                .get(&'b')
++                .unwrap()
++                .children
++                .as_ref()
++                .unwrap()
++                .get(&'c')
++                .unwrap()
++                .output
++                .clone()
++                .unwrap()
++                .symbols
++                .clone(),
++            "testbug".to_string()
++        );
++    }
++
++    #[test]
++    fn digraph_insert_and_get() {
++        let mut dg = DigraphStore::default();
++        dg.insert(
++            "abc",
++            DigraphEntry {
++                symbols: "testbug".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++
++        dg.insert(
++            "abd",
++            DigraphEntry {
++                symbols: "deadbeef".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++
++        assert_eq!(
++            dg.get("abc").map(|x| x.symbols.clone()),
++            Some("testbug".to_string())
++        );
++        assert_eq!(
++            dg.get("abd").map(|x| x.symbols.clone()),
++            Some("deadbeef".to_string())
++        );
++        assert_eq!(dg.get("abe").map(|x| x.symbols.clone()), None);
++    }
++
++    #[test]
++    fn digraph_node_iter() {
++        let mut dg = DigraphStore::default();
++        dg.insert(
++            "abc",
++            DigraphEntry {
++                symbols: "testbug".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++
++        dg.insert(
++            "abd",
++            DigraphEntry {
++                symbols: "deadbeef".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++
++        assert_eq!(dg.head.iter().count(), 2);
++    }
++
++    #[test]
++    fn digraph_search() {
++        let mut dg = DigraphStore::default();
++        dg.insert(
++            "abc",
++            DigraphEntry {
++                symbols: "testbug".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++
++        dg.insert(
++            "abd",
++            DigraphEntry {
++                symbols: "deadbeef".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++        dg.insert(
++            "azz",
++            DigraphEntry {
++                symbols: "qwerty".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++
++        assert_eq!(dg.search("ab").count(), 2);
++        assert_eq!(dg.search("az").next().unwrap().symbols, "qwerty");
++    }
++
++    #[test]
++    fn digraph_search_breadth() {
++        let mut dg = DigraphStore::default();
++        dg.insert(
++            "abccccc",
++            DigraphEntry {
++                symbols: "testbug".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++
++        dg.insert(
++            "abd",
++            DigraphEntry {
++                symbols: "deadbeef".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++        dg.insert(
++            "abee",
++            DigraphEntry {
++                symbols: "qwerty".into(),
++                ..Default::default()
++            },
++        )
++        .unwrap();
++
++        assert_eq!(dg.search("ab").count(), 3);
++        assert_eq!(dg.search("ab").next().unwrap().symbols, "deadbeef");
++    }
++}
+diff --git a/helix-view/src/editor.rs b/helix-view/src/editor.rs
+index 543c7bde..5fce5446 100644
+--- a/helix-view/src/editor.rs
++++ b/helix-view/src/editor.rs
+@@ -1,6 +1,7 @@
+ use crate::{
+     align_view,
+     clipboard::{get_clipboard_provider, ClipboardProvider},
++    digraph::DigraphStore,
+     document::{DocumentSavedEventFuture, DocumentSavedEventResult, Mode, SavePoint},
+     graphics::{CursorKind, Rect},
+     info::Info,
+@@ -318,6 +319,8 @@ pub struct Config {
+     pub default_line_ending: LineEndingConfig,
+     /// Whether to render rainbow highlights. Defaults to `false`.
+     pub rainbow_brackets: bool,
++    /// User supplied digraphs for use with the `insert_diagraphs` command
++    pub digraphs: DigraphStore,
+ }
+ 
+ #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+@@ -864,6 +867,7 @@ fn default() -> Self {
+             workspace_lsp_roots: Vec::new(),
+             default_line_ending: LineEndingConfig::default(),
+             rainbow_brackets: false,
++            digraphs: Default::default(),
+         }
+     }
+ }
+diff --git a/helix-view/src/lib.rs b/helix-view/src/lib.rs
+index c3f67345..0eabafa5 100644
+--- a/helix-view/src/lib.rs
++++ b/helix-view/src/lib.rs
+@@ -12,6 +12,7 @@ pub mod handlers {
+     pub mod lsp;
+ }
+ pub mod base64;
++pub mod digraph;
+ pub mod info;
+ pub mod input;
+ pub mod keyboard;
+-- 
+2.41.0
+

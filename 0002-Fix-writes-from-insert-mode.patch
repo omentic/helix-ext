@@ -1,15 +1,16 @@
-From 9c4369da34bbbb1a6d26ba35be41739f36fb722b Mon Sep 17 00:00:00 2001
+From 6ef36e958254b873684621bb91d1ba299e2d9d7d Mon Sep 17 00:00:00 2001
 From: JJ <git@toki.la>
-Date: Sat, 3 Jun 2023 23:03:58 -0700
+Date: Sat, 15 Jul 2023 17:42:04 -0700
 Subject: [PATCH 1/2] Fix writes from insert mode not properly updating the
  revision history
 
+ref: https://github.com/helix-editor/helix/pull/7226
 ---
  helix-term/src/commands/typed.rs | 2 ++
  1 file changed, 2 insertions(+)
 
 diff --git a/helix-term/src/commands/typed.rs b/helix-term/src/commands/typed.rs
-index 706442e4..8e043385 100644
+index dfc71dfd..3f746bf0 100644
 --- a/helix-term/src/commands/typed.rs
 +++ b/helix-term/src/commands/typed.rs
 @@ -350,6 +350,8 @@ fn write_impl(
@@ -25,9 +26,9 @@ index 706442e4..8e043385 100644
 2.41.0
 
 
-From e2a877432ce7f75eba60d5dd579e5a0ab45b73e8 Mon Sep 17 00:00:00 2001
+From 8305a40ec1fba47295987e8e8278a4aa2061009e Mon Sep 17 00:00:00 2001
 From: JJ <git@toki.la>
-Date: Sat, 3 Jun 2023 23:06:02 -0700
+Date: Sat, 15 Jul 2023 17:44:04 -0700
 Subject: [PATCH 2/2] Write pre-manipulation pastes to the revision history
 
 ---
@@ -35,10 +36,10 @@ Subject: [PATCH 2/2] Write pre-manipulation pastes to the revision history
  1 file changed, 1 insertion(+), 7 deletions(-)
 
 diff --git a/helix-term/src/ui/editor.rs b/helix-term/src/ui/editor.rs
-index 43b5d1af..ef4299b4 100644
+index 5b5cda93..252aff0d 100644
 --- a/helix-term/src/ui/editor.rs
 +++ b/helix-term/src/ui/editor.rs
-@@ -1235,15 +1235,9 @@ fn handle_event(
+@@ -1240,15 +1240,9 @@ fn handle_event(
                  cx.editor.count = None;
  
                  let config = cx.editor.config();

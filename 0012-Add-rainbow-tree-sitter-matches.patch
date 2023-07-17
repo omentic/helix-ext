@@ -1,0 +1,2432 @@
+From bbc6c8ad315d6a8830d41f1eac59ddc8b31e799c Mon Sep 17 00:00:00 2001
+From: JJ <git@toki.la>
+Date: Sat, 15 Jul 2023 19:00:54 -0700
+Subject: [PATCH 1/2] Add rainbow tree-sitter highlights
+
+ref: https://github.com/helix-editor/helix/pull/2857
+---
+ book/src/SUMMARY.md                        |   1 +
+ book/src/configuration.md                  |   1 +
+ book/src/guides/README.md                  |   2 +-
+ book/src/guides/rainbow_bracket_queries.md | 132 +++++++
+ book/src/languages.md                      |   2 +
+ book/src/themes.md                         |  11 +
+ helix-core/src/syntax.rs                   | 417 +++++++++++++++++----
+ helix-term/src/health.rs                   |  11 +-
+ helix-term/src/ui/editor.rs                |  53 +++
+ helix-view/src/editor.rs                   |   6 +-
+ helix-view/src/theme.rs                    | 113 +++++-
+ xtask/src/querycheck.rs                    |   1 +
+ 12 files changed, 669 insertions(+), 81 deletions(-)
+ create mode 100644 book/src/guides/rainbow_bracket_queries.md
+
+diff --git a/book/src/SUMMARY.md b/book/src/SUMMARY.md
+index ba330cf7..dcd128de 100644
+--- a/book/src/SUMMARY.md
++++ b/book/src/SUMMARY.md
+@@ -17,3 +17,4 @@ # Summary
+   - [Adding textobject queries](./guides/textobject.md)
+   - [Adding indent queries](./guides/indent.md)
+   - [Adding injection queries](./guides/injection.md)
++  - [Adding rainbow bracket queries](./guides/rainbow_bracket_queries.md)
+diff --git a/book/src/configuration.md b/book/src/configuration.md
+index bed20b28..32a4aac4 100644
+--- a/book/src/configuration.md
++++ b/book/src/configuration.md
+@@ -65,6 +65,7 @@ ### `[editor]` Section
+ | `text-width` | Maximum line length. Used for the `:reflow` command and soft-wrapping if `soft-wrap.wrap-at-text-width` is set | `80` |
+ | `workspace-lsp-roots` | Directories relative to the workspace root that are treated as LSP roots. Should only be set in `.helix/config.toml` | `[]` |
+ | `default-line-ending` | The line ending to use for new documents. Can be `native`, `lf`, `crlf`, `ff`, `cr` or `nel`. `native` uses the platform's native line ending (`crlf` on Windows, otherwise `lf`). | `native` |
++| `rainbow-brackets` | Whether to render rainbow colors for matching brackets. Requires tree-sitter `rainbows.scm` queries for the language. | `false` |
+ 
+ ### `[editor.statusline]` Section
+ 
+diff --git a/book/src/guides/README.md b/book/src/guides/README.md
+index c25768e6..e53983d6 100644
+--- a/book/src/guides/README.md
++++ b/book/src/guides/README.md
+@@ -1,4 +1,4 @@
+ # Guides
+ 
+ This section contains guides for adding new language server configurations,
+-tree-sitter grammars, textobject queries, and other similar items.
++tree-sitter grammars, textobject and rainbow bracket queries, and other similar items.
+diff --git a/book/src/guides/rainbow_bracket_queries.md b/book/src/guides/rainbow_bracket_queries.md
+new file mode 100644
+index 00000000..1cba6a99
+--- /dev/null
++++ b/book/src/guides/rainbow_bracket_queries.md
+@@ -0,0 +1,132 @@
++# Adding Rainbow Bracket Queries
++
++Helix uses `rainbows.scm` tree-sitter query files to provide rainbow bracket
++functionality.
++
++Tree-sitter queries are documented in the tree-sitter online documentation.
++If you're writing queries for the first time, be sure to check out the section
++on [syntax highlighting queries] and on [query syntax].
++
++Rainbow queries have two captures: `@rainbow.scope` and `@rainbow.bracket`.
++`@rainbow.scope` should capture any node that increases the nesting level
++while `@rainbow.bracket` should capture any bracket nodes. Put another way:
++`@rainbow.scope` switches to the next rainbow color for all nodes in the tree
++under it while `@rainbow.bracket` paints captured nodes with the current
++rainbow color.
++
++For an example, let's add rainbow queries for the tree-sitter query (TSQ)
++language itself. These queries will go into a
++`runtime/queries/tsq/rainbows.scm` file in the repository root.
++
++First we'll add the `@rainbow.bracket` captures. TSQ only has parentheses and
++square brackets:
++
++```tsq
++["(" ")" "[" "]"] @rainbow.bracket
++```
++
++The ordering of the nodes within the alternation (square brackets) is not
++taken into consideration.
++
++> Note: Why are these nodes quoted? Most syntax highlights capture text
++> surrounded by parentheses. These are _named nodes_ and correspond to the
++> names of rules in the grammar. Brackets are usually written in tree-sitter
++> grammars as literal strings, for example:
++>
++> ```js
++> {
++>   // ...
++>   arguments: seq("(", repeat($.argument), ")"),
++>   // ...
++> }
++> ```
++>
++> Nodes written as literal strings in tree-sitter grammars may be captured
++> in queries with those same literal strings.
++
++Then we'll add `@rainbow.scope` captures. The easiest way to do this is to
++view the `grammar.js` file in the tree-sitter grammar's repository. For TSQ,
++that file is [here][tsq grammar.js]. As we scroll down the `grammar.js`, we
++see that the `(alternation)`, (L36) `(group)` (L57), `(named_node)` (L59),
++`(predicate)` (L87) and  `(wildcard_node)` (L97) nodes all contain literal
++parentheses or square brackets in their definitions. These nodes are all
++direct parents of brackets and happen to also be the nodes we want to change
++to the next rainbow color, so we capture them as `@rainbow.scope`.
++
++```tsq
++[
++  (group)
++  (named_node)
++  (wildcard_node)
++  (predicate)
++  (alternation)
++] @rainbow.scope
++```
++
++This strategy works as a rule of thumb for most programming and configuration
++languages. Markup languages can be trickier and may take additional
++experimentation to find the correct nodes to use for scopes and brackets.
++
++The `:tree-sitter-subtree` command shows the syntax tree under the primary
++selection in S-expression format and can be a useful tool for determining how
++to write a query.
++
++### Properties
++
++The `rainbow.include-children` property may be applied to `@rainbow.scope`
++captures. By default, all `@rainbow.bracket` captures must be direct descendant
++of a node captured with `@rainbow.scope` in a syntax tree in order to be
++highlighted. The `rainbow.include-children` property disables that check and
++allows `@rainbow.bracket` captures to be highlighted if they are direct or
++indirect descendants of some node captured with `@rainbow.scope`.
++
++For example, this property is used in the HTML rainbow queries.
++
++For a document like `<a>link</a>`, the syntax tree is:
++
++```tsq
++(element                   ; <a>link</a>
++  (start_tag               ; <a>
++    (tag_name))            ; a
++  (text)                   ; link
++  (end_tag                 ; </a>
++    (tag_name)))           ; a
++```
++
++If we want to highlight the `<`, `>` and `</` nodes with rainbow colors, we
++capture them as `@rainbow.bracket`:
++
++```tsq
++["<" ">" "</"] @rainbow.bracket
++```
++
++And we capture `(element)` as `@rainbow.scope` because `(element)` nodes nest
++within each other: they increment the nesting level and switch to the next
++color in the rainbow.
++
++```tsq
++(element) @rainbow.scope
++```
++
++But this combination of `@rainbow.scope` and `@rainbow.bracket` will not
++highlight any nodes. `<`, `>` and `</` are children of the `(start_tag)` and
++`(end_tag)` nodes. We can't capture `(start_tag)` and `(end_tag)` as
++`@rainbow.scope` because they don't nest other elements. We can fix this case
++by removing the requirement that `<`, `>` and `</` are direct descendants of
++`(element)` using the `rainbow.include-children` property.
++
++```tsq
++((element) @rainbow.scope
++ (#set! rainbow.include-children))
++```
++
++With this property set, `<`, `>`, and `</` will highlight with rainbow colors
++even though they aren't direct descendents of the `(element)` node.
++
++`rainbow.include-children` is not necessary for the vast majority of programming
++languages. It is only necessary when the node that increments the nesting level
++(changes rainbow color) is not the direct parent of the bracket node.
++
++[syntax highlighting queries]: https://tree-sitter.github.io/tree-sitter/syntax-highlighting#highlights
++[query syntax]: https://tree-sitter.github.io/tree-sitter/using-parsers#pattern-matching-with-queries
++[tsq grammar.js]: https://github.com/the-mikedavis/tree-sitter-tsq/blob/48b5e9f82ae0a4727201626f33a17f69f8e0ff86/grammar.js
+diff --git a/book/src/languages.md b/book/src/languages.md
+index 5e56a332..7c07a39c 100644
+--- a/book/src/languages.md
++++ b/book/src/languages.md
+@@ -68,6 +68,8 @@ ## Language configuration
+ | `formatter`           | The formatter for the language, it will take precedence over the lsp when defined. The formatter must be able to take the original file as input from stdin and write the formatted file to stdout |
+ | `text-width`          |  Maximum line length. Used for the `:reflow` command and soft-wrapping if `soft-wrap.wrap-at-text-width` is set, defaults to `editor.text-width`   |
+ | `workspace-lsp-roots`     | Directories relative to the workspace root that are treated as LSP roots. Should only be set in `.helix/config.toml`. Overwrites the setting of the same name in `config.toml` if set. |
++| `rulers`              | Overrides the `editor.rulers` config key for the language.    |
++| `rainbow-brackets`    | Overrides the `editor.rainbow-brackets` config key for the language. |
+ 
+ ### File-type detection and the `file-types` key
+ 
+diff --git a/book/src/themes.md b/book/src/themes.md
+index 41a3fe10..a70dd7cc 100644
+--- a/book/src/themes.md
++++ b/book/src/themes.md
+@@ -136,6 +136,17 @@ # Override colors in the palette:
+ berry = "#2A2A4D"
+ ```
+ 
++### Rainbow
++
++The `rainbow` key is used for rainbow highlight for matching brackets.
++The key is a list of styles.
++
++```toml
++rainbow = ["#ff0000", "#ffa500", "#fff000", { fg = "#00ff00", modifiers = ["bold"] }]
++```
++
++Colors from the palette and modifiers may be used.
++
+ ### Scopes
+ 
+ The following is a list of scopes available to use for styling:
+diff --git a/helix-core/src/syntax.rs b/helix-core/src/syntax.rs
+index f43b03ad..d0f86094 100644
+--- a/helix-core/src/syntax.rs
++++ b/helix-core/src/syntax.rs
+@@ -154,6 +154,9 @@ pub struct LanguageConfiguration {
+     /// Hardcoded LSP root directories relative to the workspace root, like `examples` or `tools/fuzz`.
+     /// Falling back to the current working directory if none are configured.
+     pub workspace_lsp_roots: Option<Vec<PathBuf>>,
++
++    /// If set, overrides rainbow brackets for a language.
++    pub rainbow_brackets: Option<bool>,
+ }
+ 
+ #[derive(Debug, PartialEq, Eq, Hash)]
+@@ -624,6 +627,8 @@ fn initialize_highlight(&self, scopes: &[String]) -> Option<Arc<HighlightConfigu
+         // always highlight syntax errors
+         // highlights_query += "\n(ERROR) @error";
+ 
++        let rainbows_query = read_query(&self.language_id, "rainbows.scm");
++
+         let injections_query = read_query(&self.language_id, "injections.scm");
+         let locals_query = read_query(&self.language_id, "locals.scm");
+ 
+@@ -642,6 +647,7 @@ fn initialize_highlight(&self, scopes: &[String]) -> Option<Arc<HighlightConfigu
+             let config = HighlightConfiguration::new(
+                 language,
+                 &highlights_query,
++                &rainbows_query,
+                 &injections_query,
+                 &locals_query,
+             )
+@@ -915,6 +921,36 @@ pub struct TsParser {
+     })
+ }
+ 
++/// Creates an iterator over the captures in a query within the given range,
++/// re-using a cursor from the pool if available.
++/// SAFETY: The `QueryCaptures` must be droped before the `QueryCursor` is dropped.
++unsafe fn query_captures<'a, 'tree>(
++    query: &'a Query,
++    root: Node<'tree>,
++    source: RopeSlice<'a>,
++    range: Option<std::ops::Range<usize>>,
++) -> (QueryCursor, QueryCaptures<'a, 'tree, RopeProvider<'a>>) {
++    // Reuse a cursor from the pool if available.
++    let mut cursor = PARSER.with(|ts_parser| {
++        let highlighter = &mut ts_parser.borrow_mut();
++        highlighter.cursors.pop().unwrap_or_else(QueryCursor::new)
++    });
++
++    // This is the unsafe line:
++    // The `captures` iterator borrows the `Tree` and the `QueryCursor`, which
++    // prevents them from being moved. But both of these values are really just
++    // pointers, so it's actually ok to move them.
++    let cursor_ref = mem::transmute::<_, &'static mut QueryCursor>(&mut cursor);
++
++    // if reusing cursors & no range this resets to whole range
++    cursor_ref.set_byte_range(range.unwrap_or(0..usize::MAX));
++    cursor_ref.set_match_limit(TREE_SITTER_MATCH_LIMIT);
++
++    let captures = cursor_ref.captures(query, root, RopeProvider(source));
++
++    (cursor, captures)
++}
++
+ #[derive(Debug)]
+ pub struct Syntax {
+     layers: HopSlotMap<LayerId, LanguageLayer>,
+@@ -1248,6 +1284,46 @@ pub fn tree(&self) -> &Tree {
+         self.layers[self.root].tree()
+     }
+ 
++    /// Iterate over all captures for a query across injection layers.
++    fn query_iter<'a, F>(
++        &'a self,
++        query_fn: F,
++        source: RopeSlice<'a>,
++        range: Option<std::ops::Range<usize>>,
++    ) -> impl Iterator<Item = (&'a LanguageLayer, QueryMatch<'a, 'a>, usize)>
++    where
++        F: Fn(&'a HighlightConfiguration) -> &'a Query,
++    {
++        let mut layers: Vec<_> = self
++            .layers
++            .iter()
++            .filter_map(|(_, layer)| {
++                let (cursor, captures) = unsafe {
++                    query_captures(
++                        query_fn(&layer.config),
++                        layer.tree().root_node(),
++                        source,
++                        range.clone(),
++                    )
++                };
++                let mut captures = captures.peekable();
++
++                // If there aren't any captures for this layer, skip the layer.
++                captures.peek()?;
++
++                Some(QueryIterLayer {
++                    cursor,
++                    captures: RefCell::new(captures),
++                    layer,
++                })
++            })
++            .collect();
++
++        layers.sort_unstable_by_key(|layer| layer.sort_key());
++
++        QueryIter { layers }
++    }
++
+     /// Iterate over the highlighted regions for a given slice of source code.
+     pub fn highlight_iter<'a>(
+         &'a self,
+@@ -1255,37 +1331,23 @@ pub fn highlight_iter<'a>(
+         range: Option<std::ops::Range<usize>>,
+         cancellation_flag: Option<&'a AtomicUsize>,
+     ) -> impl Iterator<Item = Result<HighlightEvent, Error>> + 'a {
+-        let mut layers = self
++        let mut layers: Vec<_> = self
+             .layers
+             .iter()
+             .filter_map(|(_, layer)| {
+                 // TODO: if range doesn't overlap layer range, skip it
+ 
+-                // Reuse a cursor from the pool if available.
+-                let mut cursor = PARSER.with(|ts_parser| {
+-                    let highlighter = &mut ts_parser.borrow_mut();
+-                    highlighter.cursors.pop().unwrap_or_else(QueryCursor::new)
+-                });
+-
+-                // The `captures` iterator borrows the `Tree` and the `QueryCursor`, which
+-                // prevents them from being moved. But both of these values are really just
+-                // pointers, so it's actually ok to move them.
+-                let cursor_ref =
+-                    unsafe { mem::transmute::<_, &'static mut QueryCursor>(&mut cursor) };
+-
+-                // if reusing cursors & no range this resets to whole range
+-                cursor_ref.set_byte_range(range.clone().unwrap_or(0..usize::MAX));
+-                cursor_ref.set_match_limit(TREE_SITTER_MATCH_LIMIT);
+-
+-                let mut captures = cursor_ref
+-                    .captures(
++                let (cursor, captures) = unsafe {
++                    query_captures(
+                         &layer.config.query,
+                         layer.tree().root_node(),
+-                        RopeProvider(source),
++                        source,
++                        range.clone(),
+                     )
+-                    .peekable();
++                };
++                let mut captures = captures.peekable();
+ 
+-                // If there's no captures, skip the layer
++                // If there are no captures, skip the layer
+                 captures.peek()?;
+ 
+                 Some(HighlightIterLayer {
+@@ -1302,11 +1364,13 @@ pub fn highlight_iter<'a>(
+                     depth: layer.depth,            // TODO: just reuse `layer`
+                 })
+             })
+-            .collect::<Vec<_>>();
++            .collect();
+ 
+         layers.sort_unstable_by_key(|layer| layer.sort_key());
+ 
+-        let mut result = HighlightIter {
++        sort_layers(&mut layers);
++
++        HighlightIter {
+             source,
+             byte_offset: range.map_or(0, |r| r.start),
+             cancellation_flag,
+@@ -1314,9 +1378,95 @@ pub fn highlight_iter<'a>(
+             layers,
+             next_event: None,
+             last_highlight_range: None,
+-        };
+-        result.sort_layers();
+-        result
++        }
++    }
++
++    /// Queries for rainbow highlights in the given range.
++    pub fn rainbow_spans<'a>(
++        &'a self,
++        source: RopeSlice<'a>,
++        query_range: Option<std::ops::Range<usize>>,
++        rainbow_length: usize,
++    ) -> Vec<(usize, std::ops::Range<usize>)> {
++        struct RainbowScope {
++            end: usize,
++            node_id: Option<usize>,
++            highlight: usize,
++        }
++
++        let mut spans = Vec::new();
++        let mut scope_stack: Vec<RainbowScope> = Vec::new();
++
++        // Calculating rainbow highlights is similar to determining local highlights
++        // in the highlight iterator. We iterate over the query captures for
++        // `@rainbow.scope` and `@rainbow.bracket`:
++        //
++        // * `@rainbow.scope`: pushes a new `RainbowScope` onto the `scope_stack`
++        //   stack. The number of `RainbowScope`s is the level of nesting within
++        //   brackets and determines which color of the rainbow should be used as
++        //   a highlight: `scope_stack.len() % rainbow_length`.
++        //
++        // * `@rainbow.bracket`: adds a new highlight span to the `spans` Vec.
++        //   A `@rainbow.bracket` capture only creates a new highlight if that node
++        //   is a child node of the latest node captured with `@rainbow.scope`,
++        //   or if the last `RainbowScope` on the `scope_stack` was captured with
++        //   the `(set! rainbow.include-children)` property.
++        //
++        // The iterator over the query captures returns captures across injection
++        // layers sorted by the earliest captures in the document first, so
++        // highlight colors are calculated correctly across injection layers.
++
++        // Iterate over all of the captures for rainbow queries across injections.
++        for (layer, match_, capture_index) in
++            self.query_iter(|config| &config.rainbow_query, source, query_range)
++        {
++            let capture = match_.captures[capture_index];
++            let range = capture.node.byte_range();
++
++            // If any scope in the stack ends before this new capture begins,
++            // pop the scope out of the scope stack.
++            while let Some(scope) = scope_stack.last() {
++                if range.start >= scope.end {
++                    scope_stack.pop();
++                } else {
++                    break;
++                }
++            }
++
++            if Some(capture.index) == layer.config.rainbow_scope_capture_index {
++                // If the capture is a "rainbow.scope", push it onto the scope stack.
++                let mut scope = RainbowScope {
++                    end: range.end,
++                    node_id: Some(capture.node.id()),
++                    highlight: scope_stack.len() % rainbow_length,
++                };
++                for prop in layer
++                    .config
++                    .rainbow_query
++                    .property_settings(match_.pattern_index)
++                {
++                    if prop.key.as_ref() == "rainbow.include-children" {
++                        scope.node_id = None;
++                    }
++                }
++                scope_stack.push(scope);
++            } else if Some(capture.index) == layer.config.rainbow_bracket_capture_index {
++                // If the capture is a "rainbow.bracket", check that the top of the scope stack
++                // is a valid scope for the bracket. The scope is valid if:
++                // * The scope's node is the direct parent of the captured node.
++                // * The scope has the "rainbow.include-children" property set. This allows the
++                //   scope to match all descendant nodes in its range.
++                if let Some(scope) = scope_stack.last() {
++                    if scope.node_id.is_none()
++                        || capture.node.parent().map(|p| p.id()) == scope.node_id
++                    {
++                        spans.push((scope.highlight, range));
++                    }
++                }
++            }
++        }
++
++        spans
+     }
+ 
+     // Commenting
+@@ -1331,6 +1481,18 @@ pub fn highlight_iter<'a>(
+     // TODO: Folding
+ }
+ 
++/// Finds the child of `node` which contains the given byte range `range`.
++pub fn child_for_byte_range(node: Node, range: std::ops::Range<usize>) -> Option<Node> {
++    for child in node.children(&mut node.walk()) {
++        let child_range = child.byte_range();
++        if range.start >= child_range.start && range.end <= child_range.end {
++            return Some(child);
++        }
++    }
++
++    None
++}
++
+ bitflags! {
+     /// Flags that track the status of a layer
+     /// in the `Sytaxn::update` function
+@@ -1558,7 +1720,8 @@ pub enum HighlightEvent {
+ #[derive(Debug)]
+ pub struct HighlightConfiguration {
+     pub language: Grammar,
+-    pub query: Query,
++    query: Query,
++    rainbow_query: Query,
+     injections_query: Query,
+     combined_injections_query: Option<Query>,
+     highlights_pattern_index: usize,
+@@ -1572,6 +1735,8 @@ pub struct HighlightConfiguration {
+     local_def_capture_index: Option<u32>,
+     local_def_value_capture_index: Option<u32>,
+     local_ref_capture_index: Option<u32>,
++    rainbow_scope_capture_index: Option<u32>,
++    rainbow_bracket_capture_index: Option<u32>,
+ }
+ 
+ #[derive(Debug)]
+@@ -1656,6 +1821,7 @@ impl HighlightConfiguration {
+     pub fn new(
+         language: Grammar,
+         highlights_query: &str,
++        rainbow_query: &str,
+         injection_query: &str,
+         locals_query: &str,
+     ) -> Result<Self, QueryError> {
+@@ -1675,6 +1841,7 @@ pub fn new(
+                 highlights_pattern_index += 1;
+             }
+         }
++        let rainbow_query = Query::new(language, rainbow_query)?;
+ 
+         let mut injections_query = Query::new(language, injection_query)?;
+ 
+@@ -1717,6 +1884,8 @@ pub fn new(
+         let mut local_def_value_capture_index = None;
+         let mut local_ref_capture_index = None;
+         let mut local_scope_capture_index = None;
++        let mut rainbow_scope_capture_index = None;
++        let mut rainbow_bracket_capture_index = None;
+         for (i, name) in query.capture_names().iter().enumerate() {
+             let i = Some(i as u32);
+             match name.as_str() {
+@@ -1728,6 +1897,15 @@ pub fn new(
+             }
+         }
+ 
++        for (i, name) in rainbow_query.capture_names().iter().enumerate() {
++            let i = Some(i as u32);
++            match name.as_str() {
++                "rainbow.scope" => rainbow_scope_capture_index = i,
++                "rainbow.bracket" => rainbow_bracket_capture_index = i,
++                _ => {}
++            }
++        }
++
+         for (i, name) in injections_query.capture_names().iter().enumerate() {
+             let i = Some(i as u32);
+             match name.as_str() {
+@@ -1743,6 +1921,7 @@ pub fn new(
+         Ok(Self {
+             language,
+             query,
++            rainbow_query,
+             injections_query,
+             combined_injections_query,
+             highlights_pattern_index,
+@@ -1756,6 +1935,8 @@ pub fn new(
+             local_def_capture_index,
+             local_def_value_capture_index,
+             local_ref_capture_index,
++            rainbow_scope_capture_index,
++            rainbow_bracket_capture_index,
+         })
+     }
+ 
+@@ -1896,11 +2077,21 @@ fn injection_for_match<'a>(
+     }
+ }
+ 
+-impl<'a> HighlightIterLayer<'a> {
+-    // First, sort scope boundaries by their byte offset in the document. At a
+-    // given position, emit scope endings before scope beginnings. Finally, emit
+-    // scope boundaries from deeper layers first.
+-    fn sort_key(&self) -> Option<(usize, bool, isize)> {
++trait IterLayer {
++    type SortKey: PartialOrd;
++
++    fn sort_key(&self) -> Option<Self::SortKey>;
++
++    fn cursor(self) -> QueryCursor;
++}
++
++impl<'a> IterLayer for HighlightIterLayer<'a> {
++    type SortKey = (usize, bool, isize);
++
++    fn sort_key(&self) -> Option<Self::SortKey> {
++        // First, sort scope boundaries by their byte offset in the document. At a
++        // given position, emit scope endings before scope beginnings. Finally, emit
++        // scope boundaries from deeper layers first.
+         let depth = -(self.depth as isize);
+         let next_start = self
+             .captures
+@@ -1921,6 +2112,82 @@ fn sort_key(&self) -> Option<(usize, bool, isize)> {
+             _ => None,
+         }
+     }
++
++    fn cursor(self) -> QueryCursor {
++        self.cursor
++    }
++}
++
++impl<'a> IterLayer for QueryIterLayer<'a> {
++    type SortKey = (usize, isize);
++
++    fn sort_key(&self) -> Option<Self::SortKey> {
++        // Sort the layers so that the first layer in the Vec has the next
++        // capture ordered by start byte and depth (descending).
++        let depth = -(self.layer.depth as isize);
++        let mut captures = self.captures.borrow_mut();
++        let (match_, capture_index) = captures.peek()?;
++        let start = match_.captures[*capture_index].node.start_byte();
++
++        Some((start, depth))
++    }
++
++    fn cursor(self) -> QueryCursor {
++        self.cursor
++    }
++}
++
++/// Re-sort the given layers so that the next capture for the `layers[0]` is
++/// the earliest capture in the document for all layers.
++///
++/// This function assumes that `layers` is already sorted except for the
++/// first layer in the `Vec`. This function shifts the first layer later in
++/// the `Vec` after any layers with earlier captures.
++///
++/// This is quicker than a regular full sort: it can only take as many
++/// iterations as the number of layers and usually takes many fewer than
++/// the full number of layers. The case when `layers[0]` is already the
++/// layer with the earliest capture and the sort is a no-op is a fast-lane
++/// which only takes one comparison operation.
++///
++/// This function also removes any layers which have no more query captures
++/// to emit.
++fn sort_layers<L: IterLayer>(layers: &mut Vec<L>) {
++    while !layers.is_empty() {
++        // If `Layer::sort_key` returns `None`, the layer has no more captures
++        // to emit and can be removed.
++        if let Some(sort_key) = layers[0].sort_key() {
++            let mut i = 0;
++            while i + 1 < layers.len() {
++                if let Some(next_offset) = layers[i + 1].sort_key() {
++                    // Compare `0`'s sort key to `i + 1`'s. If `i + 1` comes
++                    // before `0`, shift the `0` layer so it comes after the
++                    // `i + 1` layers.
++                    if next_offset < sort_key {
++                        i += 1;
++                        continue;
++                    }
++                } else {
++                    let layer = layers.remove(i + 1);
++                    PARSER.with(|ts_parser| {
++                        let highlighter = &mut ts_parser.borrow_mut();
++                        highlighter.cursors.push(layer.cursor());
++                    });
++                }
++                break;
++            }
++            if i > 0 {
++                layers[0..(i + 1)].rotate_left(1);
++            }
++            break;
++        } else {
++            let layer = layers.remove(0);
++            PARSER.with(|ts_parser| {
++                let highlighter = &mut ts_parser.borrow_mut();
++                highlighter.cursors.push(layer.cursor());
++            });
++        }
++    }
+ }
+ 
+ #[derive(Clone)]
+@@ -2051,42 +2318,9 @@ fn emit_event(
+         } else {
+             result = event.map(Ok);
+         }
+-        self.sort_layers();
++        sort_layers(&mut self.layers);
+         result
+     }
+-
+-    fn sort_layers(&mut self) {
+-        while !self.layers.is_empty() {
+-            if let Some(sort_key) = self.layers[0].sort_key() {
+-                let mut i = 0;
+-                while i + 1 < self.layers.len() {
+-                    if let Some(next_offset) = self.layers[i + 1].sort_key() {
+-                        if next_offset < sort_key {
+-                            i += 1;
+-                            continue;
+-                        }
+-                    } else {
+-                        let layer = self.layers.remove(i + 1);
+-                        PARSER.with(|ts_parser| {
+-                            let highlighter = &mut ts_parser.borrow_mut();
+-                            highlighter.cursors.push(layer.cursor);
+-                        });
+-                    }
+-                    break;
+-                }
+-                if i > 0 {
+-                    self.layers[0..(i + 1)].rotate_left(1);
+-                }
+-                break;
+-            } else {
+-                let layer = self.layers.remove(0);
+-                PARSER.with(|ts_parser| {
+-                    let highlighter = &mut ts_parser.borrow_mut();
+-                    highlighter.cursors.push(layer.cursor);
+-                });
+-            }
+-        }
+-    }
+ }
+ 
+ impl<'a> Iterator for HighlightIter<'a> {
+@@ -2238,7 +2472,7 @@ fn next(&mut self) -> Option<Self::Item> {
+                     }
+                 }
+ 
+-                self.sort_layers();
++                sort_layers(&mut self.layers);
+                 continue 'main;
+             }
+ 
+@@ -2247,7 +2481,7 @@ fn next(&mut self) -> Option<Self::Item> {
+             // a different layer, then skip over this one.
+             if let Some((last_start, last_end, last_depth)) = self.last_highlight_range {
+                 if range.start == last_start && range.end == last_end && layer.depth < last_depth {
+-                    self.sort_layers();
++                    sort_layers(&mut self.layers);
+                     continue 'main;
+                 }
+             }
+@@ -2265,7 +2499,7 @@ fn next(&mut self) -> Option<Self::Item> {
+                         }
+                     }
+ 
+-                    self.sort_layers();
++                    sort_layers(&mut self.layers);
+                     continue 'main;
+                 }
+             }
+@@ -2300,7 +2534,7 @@ fn next(&mut self) -> Option<Self::Item> {
+                     .emit_event(range.start, Some(HighlightEvent::HighlightStart(highlight)));
+             }
+ 
+-            self.sort_layers();
++            sort_layers(&mut self.layers);
+         }
+     }
+ }
+@@ -2510,6 +2744,42 @@ fn pretty_print_tree_impl<W: fmt::Write>(
+     Ok(())
+ }
+ 
++struct QueryIterLayer<'a> {
++    cursor: QueryCursor,
++    captures: RefCell<iter::Peekable<QueryCaptures<'a, 'a, RopeProvider<'a>>>>,
++    layer: &'a LanguageLayer,
++}
++
++impl<'a> fmt::Debug for QueryIterLayer<'a> {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_struct("QueryIterLayer").finish()
++    }
++}
++
++#[derive(Debug)]
++pub struct QueryIter<'a> {
++    layers: Vec<QueryIterLayer<'a>>,
++}
++
++impl<'a> Iterator for QueryIter<'a> {
++    type Item = (&'a LanguageLayer, QueryMatch<'a, 'a>, usize);
++
++    fn next(&mut self) -> Option<Self::Item> {
++        // Sort the layers so that the first layer contains the next capture.
++        sort_layers(&mut self.layers);
++
++        // Emit the next capture from the lowest layer. If there are no more
++        // layers, terminate.
++        let layer = self.layers.get_mut(0)?;
++        let inner = layer.layer;
++        layer
++            .captures
++            .borrow_mut()
++            .next()
++            .map(|(match_, index)| (inner, match_, index))
++    }
++}
++
+ #[cfg(test)]
+ mod test {
+     use super::*;
+@@ -2539,7 +2809,7 @@ fn test_textobject_queries() {
+         let textobject = TextObjectQuery { query };
+         let mut cursor = QueryCursor::new();
+ 
+-        let config = HighlightConfiguration::new(language, "", "", "").unwrap();
++        let config = HighlightConfiguration::new(language, "", "", "", "").unwrap();
+         let syntax = Syntax::new(&source, Arc::new(config), Arc::new(loader)).unwrap();
+ 
+         let root = syntax.tree().root_node();
+@@ -2601,6 +2871,7 @@ fn test_parser() {
+             language,
+             &std::fs::read_to_string("../runtime/grammars/sources/rust/queries/highlights.scm")
+                 .unwrap(),
++            "", // rainbows.scm
+             &std::fs::read_to_string("../runtime/grammars/sources/rust/queries/injections.scm")
+                 .unwrap(),
+             "", // locals.scm
+@@ -2703,7 +2974,7 @@ fn assert_pretty_print(
+         });
+         let language = get_language(language_name).unwrap();
+ 
+-        let config = HighlightConfiguration::new(language, "", "", "").unwrap();
++        let config = HighlightConfiguration::new(language, "", "", "", "").unwrap();
+         let syntax = Syntax::new(&source, Arc::new(config), Arc::new(loader)).unwrap();
+ 
+         let root = syntax
+diff --git a/helix-term/src/health.rs b/helix-term/src/health.rs
+index 8f921877..462cdf3f 100644
+--- a/helix-term/src/health.rs
++++ b/helix-term/src/health.rs
+@@ -12,11 +12,17 @@ pub enum TsFeature {
+     Highlight,
+     TextObject,
+     AutoIndent,
++    RainbowBrackets,
+ }
+ 
+ impl TsFeature {
+     pub fn all() -> &'static [Self] {
+-        &[Self::Highlight, Self::TextObject, Self::AutoIndent]
++        &[
++            Self::Highlight,
++            Self::TextObject,
++            Self::AutoIndent,
++            Self::RainbowBrackets,
++        ]
+     }
+ 
+     pub fn runtime_filename(&self) -> &'static str {
+@@ -24,6 +30,7 @@ pub fn runtime_filename(&self) -> &'static str {
+             Self::Highlight => "highlights.scm",
+             Self::TextObject => "textobjects.scm",
+             Self::AutoIndent => "indents.scm",
++            Self::RainbowBrackets => "rainbows.scm",
+         }
+     }
+ 
+@@ -32,6 +39,7 @@ pub fn long_title(&self) -> &'static str {
+             Self::Highlight => "Syntax Highlighting",
+             Self::TextObject => "Treesitter Textobjects",
+             Self::AutoIndent => "Auto Indent",
++            Self::RainbowBrackets => "Rainbow Brackets",
+         }
+     }
+ 
+@@ -40,6 +48,7 @@ pub fn short_title(&self) -> &'static str {
+             Self::Highlight => "Highlight",
+             Self::TextObject => "Textobject",
+             Self::AutoIndent => "Indent",
++            Self::RainbowBrackets => "Rainbow",
+         }
+     }
+ }
+diff --git a/helix-term/src/ui/editor.rs b/helix-term/src/ui/editor.rs
+index 81f8fe22..63590e94 100644
+--- a/helix-term/src/ui/editor.rs
++++ b/helix-term/src/ui/editor.rs
+@@ -94,6 +94,11 @@ pub fn render_view(
+         let theme = &editor.theme;
+         let config = editor.config();
+ 
++        let should_render_rainbow_brackets = doc
++            .language_config()
++            .and_then(|lang_config| lang_config.rainbow_brackets)
++            .unwrap_or(config.rainbow_brackets);
++
+         let text_annotations = view.text_annotations(doc, Some(theme));
+         let mut line_decorations: Vec<Box<dyn LineDecoration>> = Vec::new();
+         let mut translated_positions: Vec<TranslatedPosition> = Vec::new();
+@@ -125,6 +130,12 @@ pub fn render_view(
+ 
+         let mut highlights =
+             Self::doc_syntax_highlights(doc, view.offset.anchor, inner.height, theme);
++        if should_render_rainbow_brackets {
++            highlights = Box::new(syntax::merge(
++                highlights,
++                Self::doc_rainbow_highlights(doc, view.offset.anchor, inner.height, theme),
++            ));
++        }
+         let overlay_highlights = Self::overlay_syntax_highlights(
+             doc,
+             view.offset.anchor,
+@@ -330,6 +341,48 @@ pub fn doc_syntax_highlights<'doc>(
+         }
+     }
+ 
++    pub fn doc_rainbow_highlights(
++        doc: &Document,
++        anchor: usize,
++        height: u16,
++        theme: &Theme,
++    ) -> Vec<(usize, std::ops::Range<usize>)> {
++        let syntax = match doc.syntax() {
++            Some(syntax) => syntax,
++            None => return Vec::new(),
++        };
++
++        let text = doc.text().slice(..);
++        let row = text.char_to_line(anchor.min(text.len_chars()));
++
++        // calculate viewport byte ranges
++        let last_line = doc.text().len_lines().saturating_sub(1);
++        let last_visible_line = (row + height as usize).saturating_sub(1).min(last_line);
++        let visible_start = text.line_to_byte(row.min(last_line));
++        let visible_end = text.line_to_byte(last_visible_line + 1);
++
++        // The calculation for the current nesting level for rainbow highlights
++        // depends on where we start the iterator from. For accuracy, we start
++        // the iterator further back than the viewport: at the start of the containing
++        // non-root syntax-tree node. Any spans that are off-screen are truncated when
++        // the spans are merged via [syntax::merge].
++        let syntax_node_start =
++            syntax::child_for_byte_range(syntax.tree().root_node(), visible_start..visible_start)
++                .map_or(visible_start, |node| node.byte_range().start);
++        let syntax_node_range = syntax_node_start..visible_end;
++
++        let mut spans = syntax.rainbow_spans(text, Some(syntax_node_range), theme.rainbow_length());
++
++        for (_highlight, range) in spans.iter_mut() {
++            let start = text.byte_to_char(ensure_grapheme_boundary_next_byte(text, range.start));
++            let end = text.byte_to_char(ensure_grapheme_boundary_next_byte(text, range.end));
++
++            *range = start..end;
++        }
++
++        spans
++    }
++
+     /// Get highlight spans for document diagnostics
+     pub fn doc_diagnostics_highlights(
+         doc: &Document,
+diff --git a/helix-view/src/editor.rs b/helix-view/src/editor.rs
+index 1ab5f976..c0410f7d 100644
+--- a/helix-view/src/editor.rs
++++ b/helix-view/src/editor.rs
+@@ -316,6 +316,8 @@ pub struct Config {
+     pub workspace_lsp_roots: Vec<PathBuf>,
+     /// Which line ending to choose for new documents. Defaults to `native`. i.e. `crlf` on Windows, otherwise `lf`.
+     pub default_line_ending: LineEndingConfig,
++    /// Whether to render rainbow highlights. Defaults to `false`.
++    pub rainbow_brackets: bool,
+ }
+ 
+ #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+@@ -851,6 +853,7 @@ fn default() -> Self {
+             completion_replace: false,
+             workspace_lsp_roots: Vec::new(),
+             default_line_ending: LineEndingConfig::default(),
++            rainbow_brackets: false,
+         }
+     }
+ }
+@@ -1181,8 +1184,7 @@ fn set_theme_impl(&mut self, theme: Theme, preview: ThemeAction) {
+             return;
+         }
+ 
+-        let scopes = theme.scopes();
+-        self.syn_loader.set_scopes(scopes.to_vec());
++        self.syn_loader.set_scopes(theme.scopes().to_vec());
+ 
+         match preview {
+             ThemeAction::Preview => {
+diff --git a/helix-view/src/theme.rs b/helix-view/src/theme.rs
+index bf3379ca..2b024384 100644
+--- a/helix-view/src/theme.rs
++++ b/helix-view/src/theme.rs
+@@ -216,17 +216,19 @@ pub struct Theme {
+     // tree-sitter highlight styles are stored in a Vec to optimize lookups
+     scopes: Vec<String>,
+     highlights: Vec<Style>,
++    rainbow_length: usize,
+ }
+ 
+ impl From<Value> for Theme {
+     fn from(value: Value) -> Self {
+         if let Value::Table(table) = value {
+-            let (styles, scopes, highlights) = build_theme_values(table);
++            let (styles, scopes, highlights, rainbow_length) = build_theme_values(table);
+ 
+             Self {
+                 styles,
+                 scopes,
+                 highlights,
++                rainbow_length,
+                 ..Default::default()
+             }
+         } else {
+@@ -243,12 +245,13 @@ fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+     {
+         let values = Map::<String, Value>::deserialize(deserializer)?;
+ 
+-        let (styles, scopes, highlights) = build_theme_values(values);
++        let (styles, scopes, highlights, rainbow_length) = build_theme_values(values);
+ 
+         Ok(Self {
+             styles,
+             scopes,
+             highlights,
++            rainbow_length,
+             ..Default::default()
+         })
+     }
+@@ -256,10 +259,11 @@ fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+ 
+ fn build_theme_values(
+     mut values: Map<String, Value>,
+-) -> (HashMap<String, Style>, Vec<String>, Vec<Style>) {
++) -> (HashMap<String, Style>, Vec<String>, Vec<Style>, usize) {
+     let mut styles = HashMap::new();
+     let mut scopes = Vec::new();
+     let mut highlights = Vec::new();
++    let mut rainbow_length = 0;
+ 
+     // TODO: alert user of parsing failures in editor
+     let palette = values
+@@ -276,6 +280,27 @@ fn build_theme_values(
+     styles.reserve(values.len());
+     scopes.reserve(values.len());
+     highlights.reserve(values.len());
++
++    for (i, style) in values
++        .remove("rainbow")
++        .and_then(|value| match palette.parse_style_array(value) {
++            Ok(styles) => Some(styles),
++            Err(err) => {
++                warn!("{}", err);
++                None
++            }
++        })
++        .unwrap_or_else(default_rainbow)
++        .iter()
++        .enumerate()
++    {
++        let name = format!("rainbow.{}", i);
++        styles.insert(name.clone(), *style);
++        scopes.push(name);
++        highlights.push(*style);
++        rainbow_length += 1;
++    }
++
+     for (name, style_value) in values {
+         let mut style = Style::default();
+         if let Err(err) = palette.parse_style(&mut style, style_value) {
+@@ -288,7 +313,7 @@ fn build_theme_values(
+         highlights.push(style);
+     }
+ 
+-    (styles, scopes, highlights)
++    (styles, scopes, highlights, rainbow_length)
+ }
+ 
+ impl Theme {
+@@ -349,6 +374,21 @@ pub fn is_16_color(&self) -> bool {
+                 .all(|color| !matches!(color, Some(Color::Rgb(..))))
+         })
+     }
++
++    pub fn rainbow_length(&self) -> usize {
++        self.rainbow_length
++    }
++}
++
++fn default_rainbow() -> Vec<Style> {
++    vec![
++        Style::default().fg(Color::Red),
++        Style::default().fg(Color::Yellow),
++        Style::default().fg(Color::Green),
++        Style::default().fg(Color::Blue),
++        Style::default().fg(Color::Cyan),
++        Style::default().fg(Color::Magenta),
++    ]
+ }
+ 
+ struct ThemePalette {
+@@ -494,6 +534,24 @@ pub fn parse_style(&self, style: &mut Style, value: Value) -> Result<(), String>
+         }
+         Ok(())
+     }
++
++    /// Parses a TOML array into a [`Vec`] of [`Style`]. If the value cannot be
++    /// parsed as an array or if any style in the array cannot be parsed then an
++    /// error is returned.
++    pub fn parse_style_array(&self, value: Value) -> Result<Vec<Style>, String> {
++        let mut styles = Vec::new();
++
++        for v in value
++            .as_array()
++            .ok_or_else(|| format!("Theme: could not parse value as an array: '{}'", value))?
++        {
++            let mut style = Style::default();
++            self.parse_style(&mut style, v.clone())?;
++            styles.push(style);
++        }
++
++        Ok(styles)
++    }
+ }
+ 
+ impl TryFrom<Value> for ThemePalette {
+@@ -568,4 +626,51 @@ fn test_parse_style_table() {
+                 .add_modifier(Modifier::BOLD)
+         );
+     }
++
++    #[test]
++    fn test_parse_valid_style_array() {
++        let theme = toml::toml! {
++            rainbow = ["#ff0000", "#ffa500", "#fff000", { fg = "#00ff00", modifiers = ["bold"] }]
++        };
++
++        let palette = ThemePalette::default();
++
++        let rainbow = theme.get("rainbow").unwrap();
++        let parse_result = palette.parse_style_array(rainbow.clone());
++
++        assert_eq!(
++            Ok(vec![
++                Style::default().fg(Color::Rgb(255, 0, 0)),
++                Style::default().fg(Color::Rgb(255, 165, 0)),
++                Style::default().fg(Color::Rgb(255, 240, 0)),
++                Style::default()
++                    .fg(Color::Rgb(0, 255, 0))
++                    .add_modifier(Modifier::BOLD),
++            ]),
++            parse_result
++        )
++    }
++
++    #[test]
++    fn test_parse_invalid_style_array() {
++        let palette = ThemePalette::default();
++
++        let theme = toml::toml! { invalid_hex_code = ["#f00"] };
++        let invalid_hex_code = theme.get("invalid_hex_code").unwrap();
++        let parse_result = palette.parse_style_array(invalid_hex_code.clone());
++
++        assert_eq!(
++            Err("Theme: malformed hexcode: #f00".to_string()),
++            parse_result
++        );
++
++        let theme = toml::toml! { not_an_array = { red = "#ff0000" } };
++        let not_an_array = theme.get("not_an_array").unwrap();
++        let parse_result = palette.parse_style_array(not_an_array.clone());
++
++        assert_eq!(
++            Err("Theme: could not parse value as an array: '{ red = \"#ff0000\" }'".to_string()),
++            parse_result
++        )
++    }
+ }
+diff --git a/xtask/src/querycheck.rs b/xtask/src/querycheck.rs
+index 454d0e5c..31de9321 100644
+--- a/xtask/src/querycheck.rs
++++ b/xtask/src/querycheck.rs
+@@ -11,6 +11,7 @@ pub fn query_check() -> Result<(), DynError> {
+         "injections.scm",
+         "textobjects.scm",
+         "indents.scm",
++        "rainbows.scm",
+     ];
+ 
+     for language in lang_config().language {
+-- 
+2.41.0
+
+
+From 28328c056dca18283faba5067ee713c6a4800760 Mon Sep 17 00:00:00 2001
+From: JJ <git@toki.la>
+Date: Sat, 15 Jul 2023 19:04:35 -0700
+Subject: [PATCH 2/2] Add rainbow bracket queries
+
+---
+ book/src/generated/lang-support.md       | 350 +++++++++++------------
+ runtime/queries/bash/rainbows.scm        |  21 ++
+ runtime/queries/c/rainbows.scm           |  29 ++
+ runtime/queries/clojure/rainbows.scm     |  13 +
+ runtime/queries/common-lisp/rainbows.scm |   1 +
+ runtime/queries/cpp/rainbows.scm         |  49 ++++
+ runtime/queries/css/rainbows.scm         |  15 +
+ runtime/queries/ecma/rainbows.scm        |  28 ++
+ runtime/queries/elixir/rainbows.scm      |  24 ++
+ runtime/queries/erlang/rainbows.scm      |  24 ++
+ runtime/queries/go/rainbows.scm          |  33 +++
+ runtime/queries/html/rainbows.scm        |  13 +
+ runtime/queries/java/rainbows.scm        |  35 +++
+ runtime/queries/javascript/rainbows.scm  |   1 +
+ runtime/queries/json/rainbows.scm        |   9 +
+ runtime/queries/jsx/rainbows.scm         |  10 +
+ runtime/queries/nix/rainbows.scm         |  17 ++
+ runtime/queries/python/rainbows.scm      |  30 ++
+ runtime/queries/racket/rainbows.scm      |   1 +
+ runtime/queries/regex/rainbows.scm       |  17 ++
+ runtime/queries/ruby/rainbows.scm        |  28 ++
+ runtime/queries/rust/rainbows.scm        |  60 ++++
+ runtime/queries/scheme/rainbows.scm      |  12 +
+ runtime/queries/scss/rainbows.scm        |   3 +
+ runtime/queries/starlark/rainbows.scm    |   1 +
+ runtime/queries/toml/rainbows.scm        |  12 +
+ runtime/queries/tsq/rainbows.scm         |  12 +
+ runtime/queries/tsx/rainbows.scm         |   2 +
+ runtime/queries/typescript/rainbows.scm  |  19 ++
+ runtime/queries/xml/rainbows.scm         |  29 ++
+ runtime/queries/yaml/rainbows.scm        |   9 +
+ runtime/queries/zig/rainbows.scm         |  42 +++
+ 32 files changed, 774 insertions(+), 175 deletions(-)
+ create mode 100644 runtime/queries/bash/rainbows.scm
+ create mode 100644 runtime/queries/c/rainbows.scm
+ create mode 100644 runtime/queries/clojure/rainbows.scm
+ create mode 100644 runtime/queries/common-lisp/rainbows.scm
+ create mode 100644 runtime/queries/cpp/rainbows.scm
+ create mode 100644 runtime/queries/css/rainbows.scm
+ create mode 100644 runtime/queries/ecma/rainbows.scm
+ create mode 100644 runtime/queries/elixir/rainbows.scm
+ create mode 100644 runtime/queries/erlang/rainbows.scm
+ create mode 100644 runtime/queries/go/rainbows.scm
+ create mode 100644 runtime/queries/html/rainbows.scm
+ create mode 100644 runtime/queries/java/rainbows.scm
+ create mode 100644 runtime/queries/javascript/rainbows.scm
+ create mode 100644 runtime/queries/json/rainbows.scm
+ create mode 100644 runtime/queries/jsx/rainbows.scm
+ create mode 100644 runtime/queries/nix/rainbows.scm
+ create mode 100644 runtime/queries/python/rainbows.scm
+ create mode 100644 runtime/queries/racket/rainbows.scm
+ create mode 100644 runtime/queries/regex/rainbows.scm
+ create mode 100644 runtime/queries/ruby/rainbows.scm
+ create mode 100644 runtime/queries/rust/rainbows.scm
+ create mode 100644 runtime/queries/scheme/rainbows.scm
+ create mode 100644 runtime/queries/scss/rainbows.scm
+ create mode 100644 runtime/queries/starlark/rainbows.scm
+ create mode 100644 runtime/queries/toml/rainbows.scm
+ create mode 100644 runtime/queries/tsq/rainbows.scm
+ create mode 100644 runtime/queries/tsx/rainbows.scm
+ create mode 100644 runtime/queries/typescript/rainbows.scm
+ create mode 100644 runtime/queries/xml/rainbows.scm
+ create mode 100644 runtime/queries/yaml/rainbows.scm
+ create mode 100644 runtime/queries/zig/rainbows.scm
+
+diff --git a/book/src/generated/lang-support.md b/book/src/generated/lang-support.md
+index 2d0e83db..72155543 100644
+--- a/book/src/generated/lang-support.md
++++ b/book/src/generated/lang-support.md
+@@ -1,175 +1,175 @@
+-| Language | Syntax Highlighting | Treesitter Textobjects | Auto Indent | Default LSP |
+-| --- | --- | --- | --- | --- |
+-| astro | ✓ |  |  |  |
+-| awk | ✓ | ✓ |  | `awk-language-server` |
+-| bash | ✓ |  | ✓ | `bash-language-server` |
+-| bass | ✓ |  |  | `bass` |
+-| beancount | ✓ |  |  |  |
+-| bibtex | ✓ |  |  | `texlab` |
+-| bicep | ✓ |  |  | `bicep-langserver` |
+-| blueprint | ✓ |  |  | `blueprint-compiler` |
+-| c | ✓ | ✓ | ✓ | `clangd` |
+-| c-sharp | ✓ | ✓ |  | `OmniSharp` |
+-| cabal |  |  |  |  |
+-| cairo | ✓ | ✓ | ✓ | `cairo-language-server` |
+-| capnp | ✓ |  | ✓ |  |
+-| clojure | ✓ |  |  | `clojure-lsp` |
+-| cmake | ✓ | ✓ | ✓ | `cmake-language-server` |
+-| comment | ✓ |  |  |  |
+-| common-lisp | ✓ |  |  | `cl-lsp` |
+-| cpon | ✓ |  | ✓ |  |
+-| cpp | ✓ | ✓ | ✓ | `clangd` |
+-| crystal | ✓ | ✓ |  | `crystalline` |
+-| css | ✓ |  |  | `vscode-css-language-server` |
+-| cue | ✓ |  |  | `cuelsp` |
+-| d | ✓ | ✓ | ✓ | `serve-d` |
+-| dart | ✓ |  | ✓ | `dart` |
+-| devicetree | ✓ |  |  |  |
+-| dhall | ✓ | ✓ |  | `dhall-lsp-server` |
+-| diff | ✓ |  |  |  |
+-| dockerfile | ✓ |  |  | `docker-langserver` |
+-| dot | ✓ |  |  | `dot-language-server` |
+-| dtd | ✓ |  |  |  |
+-| edoc | ✓ |  |  |  |
+-| eex | ✓ |  |  |  |
+-| ejs | ✓ |  |  |  |
+-| elixir | ✓ | ✓ | ✓ | `elixir-ls` |
+-| elm | ✓ | ✓ |  | `elm-language-server` |
+-| elvish | ✓ |  |  | `elvish` |
+-| env | ✓ |  |  |  |
+-| erb | ✓ |  |  |  |
+-| erlang | ✓ | ✓ |  | `erlang_ls` |
+-| esdl | ✓ |  |  |  |
+-| fish | ✓ | ✓ | ✓ |  |
+-| forth | ✓ |  |  | `forth-lsp` |
+-| fortran | ✓ |  | ✓ | `fortls` |
+-| fsharp | ✓ |  |  | `fsautocomplete` |
+-| gdscript | ✓ | ✓ | ✓ |  |
+-| git-attributes | ✓ |  |  |  |
+-| git-commit | ✓ | ✓ |  |  |
+-| git-config | ✓ |  |  |  |
+-| git-ignore | ✓ |  |  |  |
+-| git-rebase | ✓ |  |  |  |
+-| gleam | ✓ | ✓ |  | `gleam` |
+-| glsl | ✓ | ✓ | ✓ |  |
+-| go | ✓ | ✓ | ✓ | `gopls` |
+-| godot-resource | ✓ |  |  |  |
+-| gomod | ✓ |  |  | `gopls` |
+-| gotmpl | ✓ |  |  | `gopls` |
+-| gowork | ✓ |  |  | `gopls` |
+-| graphql | ✓ |  |  |  |
+-| hare | ✓ |  |  |  |
+-| haskell | ✓ | ✓ |  | `haskell-language-server-wrapper` |
+-| haskell-persistent | ✓ |  |  |  |
+-| hcl | ✓ |  | ✓ | `terraform-ls` |
+-| heex | ✓ | ✓ |  | `elixir-ls` |
+-| hosts | ✓ |  |  |  |
+-| html | ✓ |  |  | `vscode-html-language-server` |
+-| hurl | ✓ |  | ✓ |  |
+-| idris |  |  |  | `idris2-lsp` |
+-| iex | ✓ |  |  |  |
+-| ini | ✓ |  |  |  |
+-| java | ✓ | ✓ |  | `jdtls` |
+-| javascript | ✓ | ✓ | ✓ | `typescript-language-server` |
+-| jsdoc | ✓ |  |  |  |
+-| json | ✓ |  | ✓ | `vscode-json-language-server` |
+-| jsonnet | ✓ |  |  | `jsonnet-language-server` |
+-| jsx | ✓ | ✓ | ✓ | `typescript-language-server` |
+-| julia | ✓ | ✓ | ✓ | `julia` |
+-| just | ✓ | ✓ | ✓ |  |
+-| kdl | ✓ |  |  |  |
+-| kotlin | ✓ |  |  | `kotlin-language-server` |
+-| latex | ✓ | ✓ |  | `texlab` |
+-| lean | ✓ |  |  | `lean` |
+-| ledger | ✓ |  |  |  |
+-| llvm | ✓ | ✓ | ✓ |  |
+-| llvm-mir | ✓ | ✓ | ✓ |  |
+-| llvm-mir-yaml | ✓ |  | ✓ |  |
+-| lua | ✓ | ✓ | ✓ | `lua-language-server` |
+-| make | ✓ |  |  |  |
+-| markdoc | ✓ |  |  | `markdoc-ls` |
+-| markdown | ✓ |  |  | `marksman` |
+-| markdown.inline | ✓ |  |  |  |
+-| matlab | ✓ | ✓ | ✓ |  |
+-| mermaid | ✓ |  |  |  |
+-| meson | ✓ |  | ✓ |  |
+-| mint |  |  |  | `mint` |
+-| msbuild | ✓ |  | ✓ |  |
+-| nasm | ✓ | ✓ |  |  |
+-| nickel | ✓ |  | ✓ | `nls` |
+-| nim | ✓ | ✓ | ✓ | `nimlangserver` |
+-| nix | ✓ |  |  | `nil` |
+-| nu | ✓ |  |  |  |
+-| ocaml | ✓ |  | ✓ | `ocamllsp` |
+-| ocaml-interface | ✓ |  |  | `ocamllsp` |
+-| odin | ✓ |  | ✓ | `ols` |
+-| opencl | ✓ | ✓ | ✓ | `clangd` |
+-| openscad | ✓ |  |  | `openscad-lsp` |
+-| org | ✓ |  |  |  |
+-| pascal | ✓ | ✓ |  | `pasls` |
+-| passwd | ✓ |  |  |  |
+-| pem | ✓ |  |  |  |
+-| perl | ✓ | ✓ | ✓ | `perlnavigator` |
+-| php | ✓ | ✓ | ✓ | `intelephense` |
+-| po | ✓ | ✓ |  |  |
+-| ponylang | ✓ | ✓ | ✓ |  |
+-| prisma | ✓ |  |  | `prisma-language-server` |
+-| prolog |  |  |  | `swipl` |
+-| protobuf | ✓ |  | ✓ |  |
+-| prql | ✓ |  |  |  |
+-| purescript | ✓ |  |  | `purescript-language-server` |
+-| python | ✓ | ✓ | ✓ | `pylsp` |
+-| qml | ✓ |  | ✓ | `qmlls` |
+-| r | ✓ |  |  | `R` |
+-| racket | ✓ |  |  | `racket` |
+-| regex | ✓ |  |  |  |
+-| rego | ✓ |  |  | `regols` |
+-| rescript | ✓ | ✓ |  | `rescript-language-server` |
+-| rmarkdown | ✓ |  | ✓ | `R` |
+-| robot | ✓ |  |  | `robotframework_ls` |
+-| ron | ✓ |  | ✓ |  |
+-| rst | ✓ |  |  |  |
+-| ruby | ✓ | ✓ | ✓ | `solargraph` |
+-| rust | ✓ | ✓ | ✓ | `rust-analyzer` |
+-| sage | ✓ | ✓ |  |  |
+-| scala | ✓ |  | ✓ | `metals` |
+-| scheme | ✓ |  |  |  |
+-| scss | ✓ |  |  | `vscode-css-language-server` |
+-| slint | ✓ |  | ✓ | `slint-lsp` |
+-| smithy | ✓ |  |  | `cs` |
+-| sml | ✓ |  |  |  |
+-| solidity | ✓ |  |  | `solc` |
+-| sql | ✓ |  |  |  |
+-| sshclientconfig | ✓ |  |  |  |
+-| starlark | ✓ | ✓ |  |  |
+-| svelte | ✓ |  | ✓ | `svelteserver` |
+-| sway | ✓ | ✓ | ✓ | `forc` |
+-| swift | ✓ |  |  | `sourcekit-lsp` |
+-| t32 | ✓ |  |  |  |
+-| tablegen | ✓ | ✓ | ✓ |  |
+-| task | ✓ |  |  |  |
+-| tfvars | ✓ |  | ✓ | `terraform-ls` |
+-| toml | ✓ |  |  | `taplo` |
+-| tsq | ✓ |  |  |  |
+-| tsx | ✓ | ✓ | ✓ | `typescript-language-server` |
+-| twig | ✓ |  |  |  |
+-| typescript | ✓ | ✓ | ✓ | `typescript-language-server` |
+-| typst | ✓ |  |  | `typst-lsp` |
+-| ungrammar | ✓ |  |  |  |
+-| uxntal | ✓ |  |  |  |
+-| v | ✓ | ✓ | ✓ | `v` |
+-| vala | ✓ |  |  | `vala-language-server` |
+-| verilog | ✓ | ✓ |  | `svlangserver` |
+-| vhdl | ✓ |  |  | `vhdl_ls` |
+-| vhs | ✓ |  |  |  |
+-| vue | ✓ |  |  | `vue-language-server` |
+-| wast | ✓ |  |  |  |
+-| wat | ✓ |  |  |  |
+-| webc | ✓ |  |  |  |
+-| wgsl | ✓ |  |  | `wgsl_analyzer` |
+-| wit | ✓ |  | ✓ |  |
+-| xit | ✓ |  |  |  |
+-| xml | ✓ |  | ✓ |  |
+-| yaml | ✓ |  | ✓ | `yaml-language-server` |
+-| yuck | ✓ |  |  |  |
+-| zig | ✓ | ✓ | ✓ | `zls` |
++| Language | Syntax Highlighting | Treesitter Textobjects | Auto Indent | Rainbow Brackets | Default LSP |
++| --- | --- | --- | --- | --- | --- |
++| astro | ✓ |  |  |  |  |
++| awk | ✓ | ✓ |  |  | `awk-language-server` |
++| bash | ✓ |  | ✓ | ✓ | `bash-language-server` |
++| bass | ✓ |  |  |  | `bass` |
++| beancount | ✓ |  |  |  |  |
++| bibtex | ✓ |  |  |  | `texlab` |
++| bicep | ✓ |  |  |  | `bicep-langserver` |
++| blueprint | ✓ |  |  |  | `blueprint-compiler` |
++| c | ✓ | ✓ | ✓ | ✓ | `clangd` |
++| c-sharp | ✓ | ✓ |  |  | `OmniSharp` |
++| cabal |  |  |  |  |  |
++| cairo | ✓ | ✓ | ✓ |  | `cairo-language-server` |
++| capnp | ✓ |  | ✓ |  |  |
++| clojure | ✓ |  |  | ✓ | `clojure-lsp` |
++| cmake | ✓ | ✓ | ✓ |  | `cmake-language-server` |
++| comment | ✓ |  |  |  |  |
++| common-lisp | ✓ |  |  | ✓ | `cl-lsp` |
++| cpon | ✓ |  | ✓ |  |  |
++| cpp | ✓ | ✓ | ✓ | ✓ | `clangd` |
++| crystal | ✓ | ✓ |  |  | `crystalline` |
++| css | ✓ |  |  | ✓ | `vscode-css-language-server` |
++| cue | ✓ |  |  |  | `cuelsp` |
++| d | ✓ | ✓ | ✓ |  | `serve-d` |
++| dart | ✓ |  | ✓ |  | `dart` |
++| devicetree | ✓ |  |  |  |  |
++| dhall | ✓ | ✓ |  |  | `dhall-lsp-server` |
++| diff | ✓ |  |  |  |  |
++| dockerfile | ✓ |  |  |  | `docker-langserver` |
++| dot | ✓ |  |  |  | `dot-language-server` |
++| dtd | ✓ |  |  |  |  |
++| edoc | ✓ |  |  |  |  |
++| eex | ✓ |  |  |  |  |
++| ejs | ✓ |  |  |  |  |
++| elixir | ✓ | ✓ | ✓ | ✓ | `elixir-ls` |
++| elm | ✓ | ✓ |  |  | `elm-language-server` |
++| elvish | ✓ |  |  |  | `elvish` |
++| env | ✓ |  |  |  |  |
++| erb | ✓ |  |  |  |  |
++| erlang | ✓ | ✓ |  | ✓ | `erlang_ls` |
++| esdl | ✓ |  |  |  |  |
++| fish | ✓ | ✓ | ✓ |  |  |
++| forth | ✓ |  |  |  | `forth-lsp` |
++| fortran | ✓ |  | ✓ |  | `fortls` |
++| fsharp | ✓ |  |  |  | `fsautocomplete` |
++| gdscript | ✓ | ✓ | ✓ |  |  |
++| git-attributes | ✓ |  |  |  |  |
++| git-commit | ✓ | ✓ |  |  |  |
++| git-config | ✓ |  |  |  |  |
++| git-ignore | ✓ |  |  |  |  |
++| git-rebase | ✓ |  |  |  |  |
++| gleam | ✓ | ✓ |  |  | `gleam` |
++| glsl | ✓ | ✓ | ✓ |  |  |
++| go | ✓ | ✓ | ✓ | ✓ | `gopls` |
++| godot-resource | ✓ |  |  |  |  |
++| gomod | ✓ |  |  |  | `gopls` |
++| gotmpl | ✓ |  |  |  | `gopls` |
++| gowork | ✓ |  |  |  | `gopls` |
++| graphql | ✓ |  |  |  |  |
++| hare | ✓ |  |  |  |  |
++| haskell | ✓ | ✓ |  |  | `haskell-language-server-wrapper` |
++| haskell-persistent | ✓ |  |  |  |  |
++| hcl | ✓ |  | ✓ |  | `terraform-ls` |
++| heex | ✓ | ✓ |  |  | `elixir-ls` |
++| hosts | ✓ |  |  |  |  |
++| html | ✓ |  |  | ✓ | `vscode-html-language-server` |
++| hurl | ✓ |  | ✓ |  |  |
++| idris |  |  |  |  | `idris2-lsp` |
++| iex | ✓ |  |  |  |  |
++| ini | ✓ |  |  |  |  |
++| java | ✓ | ✓ |  | ✓ | `jdtls` |
++| javascript | ✓ | ✓ | ✓ | ✓ | `typescript-language-server` |
++| jsdoc | ✓ |  |  |  |  |
++| json | ✓ |  | ✓ | ✓ | `vscode-json-language-server` |
++| jsonnet | ✓ |  |  |  | `jsonnet-language-server` |
++| jsx | ✓ | ✓ | ✓ | ✓ | `typescript-language-server` |
++| julia | ✓ | ✓ | ✓ |  | `julia` |
++| just | ✓ | ✓ | ✓ |  |  |
++| kdl | ✓ |  |  |  |  |
++| kotlin | ✓ |  |  |  | `kotlin-language-server` |
++| latex | ✓ | ✓ |  |  | `texlab` |
++| lean | ✓ |  |  |  | `lean` |
++| ledger | ✓ |  |  |  |  |
++| llvm | ✓ | ✓ | ✓ |  |  |
++| llvm-mir | ✓ | ✓ | ✓ |  |  |
++| llvm-mir-yaml | ✓ |  | ✓ |  |  |
++| lua | ✓ | ✓ | ✓ |  | `lua-language-server` |
++| make | ✓ |  |  |  |  |
++| markdoc | ✓ |  |  |  | `markdoc-ls` |
++| markdown | ✓ |  |  |  | `marksman` |
++| markdown.inline | ✓ |  |  |  |  |
++| matlab | ✓ | ✓ | ✓ |  |  |
++| mermaid | ✓ |  |  |  |  |
++| meson | ✓ |  | ✓ |  |  |
++| mint |  |  |  |  | `mint` |
++| msbuild | ✓ |  | ✓ |  |  |
++| nasm | ✓ | ✓ |  |  |  |
++| nickel | ✓ |  | ✓ |  | `nls` |
++| nim | ✓ | ✓ | ✓ |  | `nimlangserver` |
++| nix | ✓ |  |  | ✓ | `nil` |
++| nu | ✓ |  |  |  |  |
++| ocaml | ✓ |  | ✓ |  | `ocamllsp` |
++| ocaml-interface | ✓ |  |  |  | `ocamllsp` |
++| odin | ✓ |  | ✓ |  | `ols` |
++| opencl | ✓ | ✓ | ✓ |  | `clangd` |
++| openscad | ✓ |  |  |  | `openscad-lsp` |
++| org | ✓ |  |  |  |  |
++| pascal | ✓ | ✓ |  |  | `pasls` |
++| passwd | ✓ |  |  |  |  |
++| pem | ✓ |  |  |  |  |
++| perl | ✓ | ✓ | ✓ |  | `perlnavigator` |
++| php | ✓ | ✓ | ✓ |  | `intelephense` |
++| po | ✓ | ✓ |  |  |  |
++| ponylang | ✓ | ✓ | ✓ |  |  |
++| prisma | ✓ |  |  |  | `prisma-language-server` |
++| prolog |  |  |  |  | `swipl` |
++| protobuf | ✓ |  | ✓ |  |  |
++| prql | ✓ |  |  |  |  |
++| purescript | ✓ |  |  |  | `purescript-language-server` |
++| python | ✓ | ✓ | ✓ | ✓ | `pylsp` |
++| qml | ✓ |  | ✓ |  | `qmlls` |
++| r | ✓ |  |  |  | `R` |
++| racket | ✓ |  |  | ✓ | `racket` |
++| regex | ✓ |  |  | ✓ |  |
++| rego | ✓ |  |  |  | `regols` |
++| rescript | ✓ | ✓ |  |  | `rescript-language-server` |
++| rmarkdown | ✓ |  | ✓ |  | `R` |
++| robot | ✓ |  |  |  | `robotframework_ls` |
++| ron | ✓ |  | ✓ |  |  |
++| rst | ✓ |  |  |  |  |
++| ruby | ✓ | ✓ | ✓ | ✓ | `solargraph` |
++| rust | ✓ | ✓ | ✓ | ✓ | `rust-analyzer` |
++| sage | ✓ | ✓ |  |  |  |
++| scala | ✓ |  | ✓ |  | `metals` |
++| scheme | ✓ |  |  | ✓ |  |
++| scss | ✓ |  |  | ✓ | `vscode-css-language-server` |
++| slint | ✓ |  | ✓ |  | `slint-lsp` |
++| smithy | ✓ |  |  |  | `cs` |
++| sml | ✓ |  |  |  |  |
++| solidity | ✓ |  |  |  | `solc` |
++| sql | ✓ |  |  |  |  |
++| sshclientconfig | ✓ |  |  |  |  |
++| starlark | ✓ | ✓ |  | ✓ |  |
++| svelte | ✓ |  | ✓ |  | `svelteserver` |
++| sway | ✓ | ✓ | ✓ |  | `forc` |
++| swift | ✓ |  |  |  | `sourcekit-lsp` |
++| t32 | ✓ |  |  |  |  |
++| tablegen | ✓ | ✓ | ✓ |  |  |
++| task | ✓ |  |  |  |  |
++| tfvars | ✓ |  | ✓ |  | `terraform-ls` |
++| toml | ✓ |  |  | ✓ | `taplo` |
++| tsq | ✓ |  |  | ✓ |  |
++| tsx | ✓ | ✓ | ✓ | ✓ | `typescript-language-server` |
++| twig | ✓ |  |  |  |  |
++| typescript | ✓ | ✓ | ✓ | ✓ | `typescript-language-server` |
++| typst | ✓ |  |  |  | `typst-lsp` |
++| ungrammar | ✓ |  |  |  |  |
++| uxntal | ✓ |  |  |  |  |
++| v | ✓ | ✓ | ✓ |  | `v` |
++| vala | ✓ |  |  |  | `vala-language-server` |
++| verilog | ✓ | ✓ |  |  | `svlangserver` |
++| vhdl | ✓ |  |  |  | `vhdl_ls` |
++| vhs | ✓ |  |  |  |  |
++| vue | ✓ |  |  |  | `vue-language-server` |
++| wast | ✓ |  |  |  |  |
++| wat | ✓ |  |  |  |  |
++| webc | ✓ |  |  |  |  |
++| wgsl | ✓ |  |  |  | `wgsl_analyzer` |
++| wit | ✓ |  | ✓ |  |  |
++| xit | ✓ |  |  |  |  |
++| xml | ✓ |  | ✓ | ✓ |  |
++| yaml | ✓ |  | ✓ | ✓ | `yaml-language-server` |
++| yuck | ✓ |  |  |  |  |
++| zig | ✓ | ✓ | ✓ | ✓ | `zls` |
+diff --git a/runtime/queries/bash/rainbows.scm b/runtime/queries/bash/rainbows.scm
+new file mode 100644
+index 00000000..fd2a9d3a
+--- /dev/null
++++ b/runtime/queries/bash/rainbows.scm
+@@ -0,0 +1,21 @@
++[
++  (function_definition)
++  (compound_statement)
++  (subshell)
++  (test_command)
++  (subscript)
++  (parenthesized_expression)
++  (array)
++  (expansion_flags)
++  (expansion)
++  (command_substitution)
++] @rainbow.scope
++
++[
++  "(" ")"
++  "((" "))"
++  "${" "$("
++  "{" "}"
++  "[" "]"
++  "[[" "]]"
++] @rainbow.bracket
+diff --git a/runtime/queries/c/rainbows.scm b/runtime/queries/c/rainbows.scm
+new file mode 100644
+index 00000000..1f80868a
+--- /dev/null
++++ b/runtime/queries/c/rainbows.scm
+@@ -0,0 +1,29 @@
++[
++  (preproc_params)
++  (preproc_defined)
++  (argument_list)
++  (attribute_specifier)
++  (ms_declspec_modifier)
++  (declaration_list)
++  (parenthesized_declarator)
++  (parenthesized_expression)
++  (abstract_parenthesized_declarator)
++  (array_declarator)
++  (compound_statement)
++  (initializer_list)
++  (compound_literal_expression)
++  (enumerator_list)
++  (field_declaration_list)
++  (parameter_list)
++  (for_statement)
++  (macro_type_specifier)
++  (subscript_expression)
++  (subscript_designator)
++  (cast_expression)
++] @rainbow.scope
++
++[
++  "(" ")"
++  "{" "}"
++  "[" "]"
++] @rainbow.bracket
+diff --git a/runtime/queries/clojure/rainbows.scm b/runtime/queries/clojure/rainbows.scm
+new file mode 100644
+index 00000000..99dc8bc3
+--- /dev/null
++++ b/runtime/queries/clojure/rainbows.scm
+@@ -0,0 +1,13 @@
++[
++  (list_lit)
++  (map_lit)
++  (vec_lit)
++  (anon_fn_lit)
++] @rainbow.scope
++
++[
++  "(" ")"
++  "#"
++  "{" "}"
++  "[" "]"
++] @rainbow.bracket
+diff --git a/runtime/queries/common-lisp/rainbows.scm b/runtime/queries/common-lisp/rainbows.scm
+new file mode 100644
+index 00000000..e11eb788
+--- /dev/null
++++ b/runtime/queries/common-lisp/rainbows.scm
+@@ -0,0 +1 @@
++; inherits: scheme
+diff --git a/runtime/queries/cpp/rainbows.scm b/runtime/queries/cpp/rainbows.scm
+new file mode 100644
+index 00000000..ff4882c2
+--- /dev/null
++++ b/runtime/queries/cpp/rainbows.scm
+@@ -0,0 +1,49 @@
++[
++  ; c
++  (preproc_params)
++  (preproc_defined)
++  (argument_list)
++  (attribute_specifier)
++  (ms_declspec_modifier)
++  (declaration_list)
++  (parenthesized_declarator)
++  (parenthesized_expression)
++  (abstract_parenthesized_declarator)
++  (array_declarator)
++  (compound_statement)
++  (initializer_list)
++  (compound_literal_expression)
++  (enumerator_list)
++  (field_declaration_list)
++  (parameter_list)
++  (for_statement)
++  ; (macro_type_specifier) - not part of cpp
++  (subscript_expression)
++  (subscript_designator)
++  (cast_expression)
++
++  ; cpp
++  (decltype)
++  (explicit_function_specifier)
++  (template_parameter_list)
++  (template_argument_list)
++  (parameter_list)
++  (argument_list)
++  (structured_binding_declarator)
++  (noexcept)
++  (throw_specifier)
++  (static_assert_declaration)
++  (condition_clause)
++  (for_range_loop)
++  (new_declarator)
++  (delete_expression "[" "]")
++  (lambda_capture_specifier)
++  (sizeof_expression)
++] @rainbow.scope
++
++[
++  "(" ")"
++  "{" "}"
++  "[" "]"
++  "<" ">"
++] @rainbow.bracket
+diff --git a/runtime/queries/css/rainbows.scm b/runtime/queries/css/rainbows.scm
+new file mode 100644
+index 00000000..66b60d51
+--- /dev/null
++++ b/runtime/queries/css/rainbows.scm
+@@ -0,0 +1,15 @@
++[
++  (keyframe_block_list)
++  (block)
++  (attribute_selector)
++  (feature_query)
++  (parenthesized_query)
++  (selector_query)
++  (parenthesized_value)
++  (arguments)
++] @rainbow.scope
++
++[
++  "{" "}"
++  "(" ")"
++] @rainbow.bracket
+diff --git a/runtime/queries/ecma/rainbows.scm b/runtime/queries/ecma/rainbows.scm
+new file mode 100644
+index 00000000..50f9f813
+--- /dev/null
++++ b/runtime/queries/ecma/rainbows.scm
+@@ -0,0 +1,28 @@
++[
++  (export_clause)
++  (named_imports)
++  (statement_block)
++  (for_statement)
++  (for_in_statement)
++  (switch_body)
++  (catch_clause "(" ")")
++  (parenthesized_expression)
++  (object)
++  (object_pattern)
++  (array)
++  (array_pattern)
++  (subscript_expression)
++  (template_substitution)
++  (arguments)
++  (class_body)
++  (formal_parameters)
++  (computed_property_name)
++] @rainbow.scope
++
++[
++  "(" ")"
++  "${" "{" "}"
++  "[" "]"
++] @rainbow.bracket
++
++(regex "/" @rainbow.bracket) @rainbow.scope
+diff --git a/runtime/queries/elixir/rainbows.scm b/runtime/queries/elixir/rainbows.scm
+new file mode 100644
+index 00000000..01d3da7a
+--- /dev/null
++++ b/runtime/queries/elixir/rainbows.scm
+@@ -0,0 +1,24 @@
++[
++  (block)
++  (interpolation)
++  (list)
++  (tuple)
++  (bitstring)
++  (map)
++  ; short-hand function captures like &(&1 + &2)
++  (unary_operator
++    operator: "&")
++  (arguments "(" ")")
++  (access_call)
++  (sigil)
++] @rainbow.scope
++
++[
++  "(" ")"
++  "%"
++  "{" "}"
++  "[" "]"
++  "<<" ">>"
++  "#{"
++  "|"
++] @rainbow.bracket
+diff --git a/runtime/queries/erlang/rainbows.scm b/runtime/queries/erlang/rainbows.scm
+new file mode 100644
+index 00000000..5092c998
+--- /dev/null
++++ b/runtime/queries/erlang/rainbows.scm
+@@ -0,0 +1,24 @@
++[
++  ; ()
++  (arguments "(" ")")
++  (parenthesized_expression)
++  (function_type)
++  ; #{}
++  (record)
++  (map)
++  ; {}
++  (map_update)
++  (tuple)
++  ; <<>>
++  (bitstring)
++  ; []
++  (list)
++] @rainbow.scope
++
++[
++  "#"
++  "{" "}"
++  "(" ")"
++  "[" "]"
++  "<<" ">>"
++] @rainbow.bracket
+diff --git a/runtime/queries/go/rainbows.scm b/runtime/queries/go/rainbows.scm
+new file mode 100644
+index 00000000..81004bf8
+--- /dev/null
++++ b/runtime/queries/go/rainbows.scm
+@@ -0,0 +1,33 @@
++[
++  (import_spec_list)
++  (const_declaration)
++  (var_declaration)
++  (type_parameter_list)
++  (parameter_list)
++  (type_declaration)
++  (parenthesized_type)
++  (type_arguments)
++  (array_type)
++  (implicit_length_array_type)
++  (slice_type)
++  (field_declaration_list)
++  (interface_type)
++  (map_type)
++  (block)
++  (expression_switch_statement)
++  (type_switch_statement)
++  (select_statement)
++  (parenthesized_expression)
++  (argument_list)
++  (index_expression)
++  (slice_expression)
++  (type_assertion_expression)
++  (type_conversion_expression)
++  (literal_value)
++] @rainbow.scope
++
++[
++  "(" ")"
++  "[" "]"
++  "{" "}"
++] @rainbow.bracket
+diff --git a/runtime/queries/html/rainbows.scm b/runtime/queries/html/rainbows.scm
+new file mode 100644
+index 00000000..66e62e95
+--- /dev/null
++++ b/runtime/queries/html/rainbows.scm
+@@ -0,0 +1,13 @@
++[
++  (doctype)
++  (erroneous_end_tag)
++] @rainbow.scope
++
++([
++   (element)
++   (script_element)
++   (style_element)
++ ] @rainbow.scope
++ (#set! rainbow.include-children))
++
++["<" ">" "<!" "</" "/>"] @rainbow.bracket
+diff --git a/runtime/queries/java/rainbows.scm b/runtime/queries/java/rainbows.scm
+new file mode 100644
+index 00000000..699b899c
+--- /dev/null
++++ b/runtime/queries/java/rainbows.scm
+@@ -0,0 +1,35 @@
++[
++  (cast_expression)
++  (inferred_parameters)
++  (dimensions_expr)
++  (parenthesized_expression)
++  (array_access)
++  (argument_list)
++  (type_arguments)
++  (dimensions)
++  (block)
++  (switch_block)
++  (catch_clause)
++  (resource_specification)
++  (for_statement)
++  (enhanced_for_statement)
++  (annotation_argument_list)
++  (element_value_array_initializer)
++  (module_body)
++  (enum_body)
++  (type_parameters)
++  (class_body)
++  (constructor_body)
++  (annotation_type_body)
++  (annotation_type_element_declaration)
++  (interface_body)
++  (array_initializer)
++  (formal_parameters)
++] @rainbow.scope
++
++[
++  "(" ")"
++  "{" "}"
++  "[" "]"
++  "<" ">"
++] @rainbow.bracket
+diff --git a/runtime/queries/javascript/rainbows.scm b/runtime/queries/javascript/rainbows.scm
+new file mode 100644
+index 00000000..04328f09
+--- /dev/null
++++ b/runtime/queries/javascript/rainbows.scm
+@@ -0,0 +1 @@
++; inherits: ecma
+diff --git a/runtime/queries/json/rainbows.scm b/runtime/queries/json/rainbows.scm
+new file mode 100644
+index 00000000..5c21bdcc
+--- /dev/null
++++ b/runtime/queries/json/rainbows.scm
+@@ -0,0 +1,9 @@
++[
++  (object)
++  (array)
++] @rainbow.scope
++
++[
++  "[" "]"
++  "{" "}"
++] @rainbow.bracket
+diff --git a/runtime/queries/jsx/rainbows.scm b/runtime/queries/jsx/rainbows.scm
+new file mode 100644
+index 00000000..cf4a7e6a
+--- /dev/null
++++ b/runtime/queries/jsx/rainbows.scm
+@@ -0,0 +1,10 @@
++; inherits: ecma
++
++[
++  (jsx_expression)
++] @rainbow.scope
++
++(jsx_fragment ["<" "/" ">"] @rainbow.bracket) @rainbow.scope
++(jsx_opening_element ["<" ">"] @rainbow.bracket) @rainbow.scope
++(jsx_closing_element ["<" "/" ">"] @rainbow.bracket) @rainbow.scope
++(jsx_self_closing_element ["<" "/" ">"] @rainbow.bracket) @rainbow.scope
+diff --git a/runtime/queries/nix/rainbows.scm b/runtime/queries/nix/rainbows.scm
+new file mode 100644
+index 00000000..2df51393
+--- /dev/null
++++ b/runtime/queries/nix/rainbows.scm
+@@ -0,0 +1,17 @@
++[
++  (formals)
++  (parenthesized_expression)
++  (attrset_expression)
++  (let_attrset_expression)
++  (rec_attrset_expression)
++  (inherit_from)
++  (interpolation)
++  (list_expression)
++] @rainbow.scope
++
++[
++  "${"
++  "{" "}"
++  "(" ")"
++  "[" "]"
++] @rainbow.bracket
+diff --git a/runtime/queries/python/rainbows.scm b/runtime/queries/python/rainbows.scm
+new file mode 100644
+index 00000000..ce3efe2d
+--- /dev/null
++++ b/runtime/queries/python/rainbows.scm
+@@ -0,0 +1,30 @@
++[
++  (future_import_statement)
++  (import_from_statement)
++  (with_clause)
++  (parameters)
++  (parenthesized_list_splat)
++  (argument_list)
++  (tuple_pattern)
++  (list_pattern)
++  (subscript)
++  (list)
++  (set)
++  (tuple)
++  (dictionary)
++  (dictionary_comprehension)
++  (set_comprehension)
++  (list_comprehension)
++  (generator_expression)
++  (parenthesized_expression)
++  (interpolation)
++  (format_expression)
++] @rainbow.scope
++
++[
++  "(" ")"
++  "{" "}"
++  "[" "]"
++] @rainbow.bracket
++
++(string ["{{" "}}"] @rainbow.bracket) @rainbow.scope
+diff --git a/runtime/queries/racket/rainbows.scm b/runtime/queries/racket/rainbows.scm
+new file mode 100644
+index 00000000..e11eb788
+--- /dev/null
++++ b/runtime/queries/racket/rainbows.scm
+@@ -0,0 +1 @@
++; inherits: scheme
+diff --git a/runtime/queries/regex/rainbows.scm b/runtime/queries/regex/rainbows.scm
+new file mode 100644
+index 00000000..a9eb1cff
+--- /dev/null
++++ b/runtime/queries/regex/rainbows.scm
+@@ -0,0 +1,17 @@
++[
++  (lookahead_assertion)
++  (character_class)
++  (anonymous_capturing_group)
++  (named_capturing_group)
++  (non_capturing_group)
++  (count_quantifier)
++  (character_class_escape)
++] @rainbow.scope
++
++[
++  "(?" "(?:"
++  "(?<" ">"
++  "(" ")"
++  "[" "]"
++  "{" "}"
++] @rainbow.bracket
+diff --git a/runtime/queries/ruby/rainbows.scm b/runtime/queries/ruby/rainbows.scm
+new file mode 100644
+index 00000000..e67edfb8
+--- /dev/null
++++ b/runtime/queries/ruby/rainbows.scm
+@@ -0,0 +1,28 @@
++[
++  (begin_block)
++  (end_block)
++  (singleton_method)
++  (block_parameters)
++  (parenthesized_statements)
++  (element_reference)
++  (argument_list "(" ")")
++  (block)
++  (destructured_left_assignment)
++  (interpolation)
++  (string_array)
++  (symbol_array)
++  (regex)
++  (array)
++  (hash)
++  (method_parameters)
++] @rainbow.scope
++
++[
++  "#{"
++  "{" "}"
++  "(" ")"
++  "%w(" "%i("
++  "[" "]"
++  "|"
++  "/"
++] @rainbow.bracket
+diff --git a/runtime/queries/rust/rainbows.scm b/runtime/queries/rust/rainbows.scm
+new file mode 100644
+index 00000000..0656047b
+--- /dev/null
++++ b/runtime/queries/rust/rainbows.scm
+@@ -0,0 +1,60 @@
++[
++  ; {/}
++  (declaration_list)
++  (field_declaration_list)
++  (field_initializer_list)
++  (enum_variant_list)
++  (block)
++  (match_block)
++  (use_list)
++  (struct_pattern)
++
++  ; (/)
++  (ordered_field_declaration_list)
++  (arguments)
++  (parameters)
++  (tuple_type)
++  (tuple_expression)
++  (tuple_pattern)
++  (tuple_struct_pattern)
++  (unit_type)
++  (unit_expression)
++  (visibility_modifier)
++  (parenthesized_expression)
++  (token_repetition_pattern)
++
++  ; </>
++  (type_parameters)
++  (type_arguments)
++  (bracketed_type)
++  (for_lifetimes)
++
++  ; [/]
++  (array_type)
++  (array_expression)
++  (index_expression)
++  (slice_pattern)
++
++  ; attributes #[]
++  (attribute_item)
++  (inner_attribute_item)
++
++  ; macros
++  (token_tree_pattern)
++  (macro_definition)
++
++  ; closures
++  (closure_parameters)
++] @rainbow.scope
++
++; attributes like `#[serde(rename_all = "kebab-case")]`
++(attribute arguments: (token_tree) @rainbow.scope)
++
++[
++  "#"
++  "[" "]"
++  "(" ")"
++  "{" "}"
++  "<" ">"
++  "|"
++] @rainbow.bracket
+diff --git a/runtime/queries/scheme/rainbows.scm b/runtime/queries/scheme/rainbows.scm
+new file mode 100644
+index 00000000..f948772c
+--- /dev/null
++++ b/runtime/queries/scheme/rainbows.scm
+@@ -0,0 +1,12 @@
++[
++  (list)
++  (vector)
++  (byte_vector)
++] @rainbow.scope
++
++[
++  "#(" "#vu8("
++  "(" ")"
++  "[" "]"
++  "{" "}"
++] @rainbow.bracket
+diff --git a/runtime/queries/scss/rainbows.scm b/runtime/queries/scss/rainbows.scm
+new file mode 100644
+index 00000000..f0c648f3
+--- /dev/null
++++ b/runtime/queries/scss/rainbows.scm
+@@ -0,0 +1,3 @@
++; inherits: css
++
++(parameters) @rainbow.scope
+diff --git a/runtime/queries/starlark/rainbows.scm b/runtime/queries/starlark/rainbows.scm
+new file mode 100644
+index 00000000..0b920cbf
+--- /dev/null
++++ b/runtime/queries/starlark/rainbows.scm
+@@ -0,0 +1 @@
++; inherits: python
+diff --git a/runtime/queries/toml/rainbows.scm b/runtime/queries/toml/rainbows.scm
+new file mode 100644
+index 00000000..1f61c8ac
+--- /dev/null
++++ b/runtime/queries/toml/rainbows.scm
+@@ -0,0 +1,12 @@
++[
++  (table_array_element)
++  (table)
++  (array)
++  (inline_table)
++] @rainbow.scope
++
++[
++  "[[" "]]"
++  "[" "]"
++  "{" "}"
++] @rainbow.bracket
+diff --git a/runtime/queries/tsq/rainbows.scm b/runtime/queries/tsq/rainbows.scm
+new file mode 100644
+index 00000000..b1785fa8
+--- /dev/null
++++ b/runtime/queries/tsq/rainbows.scm
+@@ -0,0 +1,12 @@
++[
++  (group)
++  (named_node)
++  (wildcard_node)
++  (predicate)
++  (alternation)
++] @rainbow.scope
++
++[
++  "(" ")"
++  "[" "]"
++] @rainbow.bracket
+diff --git a/runtime/queries/tsx/rainbows.scm b/runtime/queries/tsx/rainbows.scm
+new file mode 100644
+index 00000000..64c2fe36
+--- /dev/null
++++ b/runtime/queries/tsx/rainbows.scm
+@@ -0,0 +1,2 @@
++; inherits: typescript
++; inherits: jsx
+diff --git a/runtime/queries/typescript/rainbows.scm b/runtime/queries/typescript/rainbows.scm
+new file mode 100644
+index 00000000..919061aa
+--- /dev/null
++++ b/runtime/queries/typescript/rainbows.scm
+@@ -0,0 +1,19 @@
++; inherits: ecma
++
++[
++  (import_require_clause)
++  (enum_body)
++  (lookup_type)
++  (parenthesized_type)
++  (object_type)
++  (type_parameters)
++  (index_signature)
++  (array_type)
++  (tuple_type)
++] @rainbow.scope
++
++(type_arguments ["<" ">"] @rainbow.bracket) @rainbow.scope
++
++[
++  "{|" "|}"
++] @rainbow.bracket
+diff --git a/runtime/queries/xml/rainbows.scm b/runtime/queries/xml/rainbows.scm
+new file mode 100644
+index 00000000..0ff9c7fa
+--- /dev/null
++++ b/runtime/queries/xml/rainbows.scm
+@@ -0,0 +1,29 @@
++[
++  (processing_instructions)
++  (cdata_sect)
++  (xml_decl)
++  (doctype_decl)
++  (element_decl)
++  (element_choice)
++  (element_seq)
++  (mixed)
++  (attlist_decl)
++  (notation_type)
++  (enumeration)
++  (ge_decl)
++  (pe_decl)
++  (notation_decl)
++] @rainbow.scope
++
++((element) @rainbow.scope
++ (#set! rainbow.include-children))
++
++[
++  "<?" "?>"
++  "<" ">"
++  "</" "/>"
++  "<!"
++  "(" ")"
++  ")*"
++  "[" "]"
++] @rainbow.bracket
+diff --git a/runtime/queries/yaml/rainbows.scm b/runtime/queries/yaml/rainbows.scm
+new file mode 100644
+index 00000000..d810accc
+--- /dev/null
++++ b/runtime/queries/yaml/rainbows.scm
+@@ -0,0 +1,9 @@
++[
++  (flow_sequence)
++  (flow_mapping)
++] @rainbow.scope
++
++[
++  "[" "]"
++  "{" "}"
++] @rainbow.bracket
+diff --git a/runtime/queries/zig/rainbows.scm b/runtime/queries/zig/rainbows.scm
+new file mode 100644
+index 00000000..af823e6d
+--- /dev/null
++++ b/runtime/queries/zig/rainbows.scm
+@@ -0,0 +1,42 @@
++[
++  ; zig
++  (ArrayTypeStart)
++  ; using ()
++  (AsmExpr)
++  (AsmOutputItem)
++  (ByteAlign)
++  (CallConv)
++  (ContainerDeclType)
++  (ErrorSetDecl)
++  (FnCallArguments)
++  (ForPrefix)
++  (GroupedExpr)
++  (IfPrefix)
++  (ParamDeclList)
++  (SwitchExpr)
++  (WhileContinueExpr)
++  (WhilePrefix)
++  ; for align expressions
++  (PtrTypeStart)
++
++  ; using {}
++  (Block)
++  (BlockExpr)
++  (FormatSequence)
++  (InitList)
++
++  ; using []
++  (SliceTypeStart)
++  (SuffixOp)
++
++  ; zig uses || for captures
++  (Payload         "|" @rainbow.bracket)
++  (PtrPayload      "|" @rainbow.bracket)
++  (PtrIndexPayload "|" @rainbow.bracket)
++] @rainbow.scope
++
++[
++  "(" ")"
++  "{" "}"
++  "[" "]"
++] @rainbow.bracket
+-- 
+2.41.0
+
