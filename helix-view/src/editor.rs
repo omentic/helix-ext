@@ -308,6 +308,8 @@ pub struct Config {
     pub explorer: ExplorerConfig,
     /// Whether to color modes with different colors. Defaults to `false`.
     pub color_modes: bool,
+    /// Whether to render rainbow highlights. Defaults to `false`.
+    pub rainbow_brackets: bool,
     pub soft_wrap: SoftWrap,
     /// Workspace specific lsp ceiling dirs
     pub workspace_lsp_roots: Vec<PathBuf>,
@@ -863,6 +865,7 @@ impl Default for Config {
             indent_guides: IndentGuidesConfig::default(),
             explorer: ExplorerConfig::default(),
             color_modes: false,
+            rainbow_brackets: false,
             soft_wrap: SoftWrap {
                 enable: Some(false),
                 ..SoftWrap::default()
@@ -1203,8 +1206,7 @@ impl Editor {
             return;
         }
 
-        let scopes = theme.scopes();
-        self.syn_loader.set_scopes(scopes.to_vec());
+        self.syn_loader.set_scopes(theme.scopes().to_vec());
 
         match preview {
             ThemeAction::Preview => {
