@@ -355,6 +355,8 @@ fn write_impl(
         None
     };
 
+    doc.append_changes_to_history(view);
+
     if fmt.is_none() {
         let id = doc.id();
         cx.editor.save(id, path, force)?;
@@ -731,6 +733,9 @@ pub fn write_all_impl(
         } else {
             None
         };
+
+        let view = view_mut!(cx.editor);
+        doc.append_changes_to_history(view);
 
         if fmt.is_none() {
             cx.editor.save::<PathBuf>(doc_id, None, force)?;

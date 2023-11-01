@@ -1311,15 +1311,9 @@ impl Component for EditorView {
                 cx.editor.count = None;
 
                 let config = cx.editor.config();
-                let mode = cx.editor.mode();
                 let (view, doc) = current!(cx.editor);
                 view.ensure_cursor_in_view(doc, config.scrolloff);
-
-                // Store a history state if not in insert mode. Otherwise wait till we exit insert
-                // to include any edits to the paste in the history state.
-                if mode != Mode::Insert {
-                    doc.append_changes_to_history(view);
-                }
+                doc.append_changes_to_history(view);
 
                 EventResult::Consumed(None)
             }
