@@ -1,5 +1,6 @@
 use crate::{
     align_view,
+    digraph::DigraphStore,
     document::{DocumentSavedEventFuture, DocumentSavedEventResult, Mode, SavePoint},
     graphics::{CursorKind, Rect},
     info::Info,
@@ -321,6 +322,8 @@ pub struct Config {
     pub insert_final_newline: bool,
     /// Enables smart tab
     pub smart_tab: Option<SmartTabConfig>,
+    /// User supplied digraphs for use with the `insert_diagraphs` command
+    pub digraphs: DigraphStore,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Eq, PartialOrd, Ord)]
@@ -889,6 +892,7 @@ impl Default for Config {
             default_line_ending: LineEndingConfig::default(),
             insert_final_newline: true,
             smart_tab: Some(SmartTabConfig::default()),
+            digraphs: Default::default(),
         }
     }
 }

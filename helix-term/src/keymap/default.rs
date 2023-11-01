@@ -137,6 +137,8 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
         "N" => search_prev,
         "*" => search_selection,
 
+        "\\" => insert_digraph,
+
         "u" => undo,
         "U" => redo,
         "A-u" => earlier,
