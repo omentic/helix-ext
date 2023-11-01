@@ -350,6 +350,16 @@ max-indent-retain = 0
 wrap-indicator = ""  # set wrap-indicator to "" to hide it
 ```
 
+### `[editor.explorer]` Section
+
+Sets explorer side width and style.
+
+| Key            | Description                                 | Default |
+| -------------- | ------------------------------------------- | ------- |
+| `column-width` | explorer side width                         | 30      |
+| `position`     | explorer widget position, `left` or `right` | `left`  |
+
+
 ### `[editor.smart-tab]` Section
 
 
