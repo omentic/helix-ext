@@ -412,3 +412,16 @@ Sets explorer side width and style.
 | -------------- | ------------------------------------------- | ------- |
 | `column-width` | explorer side width                         | 30      |
 | `position`     | explorer widget position, `left` or `right` | `left`  |
+
+
+### `[editor.digraphs]` Section
+
+By default, special characters can be input using the `insert_digraphs` command, bound to `\` in normal mode.
+Custom digraphs can be added to the `editor.digraphs` section of the config.
+
+```toml
+[editor.digraphs]
+ka = "か"
+ku = { symbols = "く", description = "The japanese character Ku" }
+shrug = "¯\\_(ツ)_/¯"
+```
