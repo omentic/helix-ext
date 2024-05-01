@@ -136,9 +136,9 @@ checksum = "df8670b8c7b9dae1793364eafadf7239c40d669904660c5960d74cfd80b46a53"
 
 [[package]]
 name = "cc"
-version = "1.0.90"
+version = "1.0.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cd6604a82acf3039f1144f54b8eb34e91ffba622051189e71b781822d5ee1f5"
+checksum = "065a29261d53ba54260972629f9ca6bffa69bac13cd1fed61420f7fa68b9f8bd"
 
 [[package]]
 name = "cfg-if"
@@ -2400,9 +2400,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter"
-version = "0.22.2"
+version = "0.22.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdb9c9f15eae91dcd00ee0d86a281d16e6263786991b662b34fa9632c21a046b"
+checksum = "688200d842c76dd88f9a7719ecb0483f79f5a766fb1c100756d5d8a059abc71b"
 dependencies = [
  "cc",
  "regex",
