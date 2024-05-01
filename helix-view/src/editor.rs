@@ -231,6 +231,30 @@ where
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
+pub struct ExplorerConfig {
+    pub position: ExplorerPosition,
+    /// explorer column width
+    pub column_width: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExplorerPosition {
+    Left,
+    Right,
+}
+
+impl Default for ExplorerConfig {
+    fn default() -> Self {
+        Self {
+            position: ExplorerPosition::Left,
+            column_width: 36,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
 pub struct Config {
     /// Padding to keep between the edge of the screen and the cursor when scrolling. Defaults to 5.
     pub scrolloff: usize,
@@ -325,6 +349,8 @@ pub struct Config {
     /// labels characters used in jumpmode
     #[serde(skip_serializing, deserialize_with = "deserialize_alphabet")]
     pub jump_label_alphabet: Vec<char>,
+    /// Explorer configuration.
+    pub explorer: ExplorerConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Eq, PartialOrd, Ord)]
@@ -902,6 +928,7 @@ impl Default for Config {
             popup_border: PopupBorderConfig::None,
             indent_heuristic: IndentationHeuristic::default(),
             jump_label_alphabet: ('a'..='z').collect(),
+            explorer: ExplorerConfig::default(),
         }
     }
 }
@@ -1063,6 +1090,18 @@ pub enum CloseError {
     BufferModified(String),
     /// Document failed to save
     SaveError(anyhow::Error),
+}
+
+impl From<CloseError> for anyhow::Error {
+    fn from(error: CloseError) -> Self {
+        match error {
+            CloseError::DoesNotExist => anyhow::anyhow!("Document doesn't exist"),
+            CloseError::BufferModified(error) => {
+                anyhow::anyhow!(format!("Buffer modified: '{error}'"))
+            }
+            CloseError::SaveError(error) => anyhow::anyhow!(format!("Save error: {error}")),
+        }
+    }
 }
 
 impl Editor {
