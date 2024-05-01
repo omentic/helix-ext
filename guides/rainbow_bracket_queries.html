@@ -196,7 +196,7 @@ language itself. These queries will go into a
 <code>runtime/queries/tsq/rainbows.scm</code> file in the repository root.</p>
 <p>First we'll add the <code>@rainbow.bracket</code> captures. TSQ only has parentheses and
 square brackets:</p>
-<pre><code class="language-tsq">[&quot;(&quot; &quot;)&quot; &quot;[&quot; &quot;]&quot;] @rainbow.bracket
+<pre><code class="language-tsq">["(" ")" "[" "]"] @rainbow.bracket
 </code></pre>
 <p>The ordering of the nodes within the alternation (square brackets) is not
 taken into consideration.</p>
@@ -207,7 +207,7 @@ names of rules in the grammar. Brackets are usually written in tree-sitter
 grammars as literal strings, for example:</p>
 <pre><code class="language-js">{
   // ...
-  arguments: seq(&quot;(&quot;, repeat($.argument), &quot;)&quot;),
+  arguments: seq("(", repeat($.argument), ")"),
   // ...
 }
 </code></pre>
@@ -254,7 +254,7 @@ indirect descendants of some node captured with <code>@rainbow.scope</code>.</p>
 </code></pre>
 <p>If we want to highlight the <code>&lt;</code>, <code>&gt;</code> and <code>&lt;/</code> nodes with rainbow colors, we
 capture them as <code>@rainbow.bracket</code>:</p>
-<pre><code class="language-tsq">[&quot;&lt;&quot; &quot;&gt;&quot; &quot;&lt;/&quot;] @rainbow.bracket
+<pre><code class="language-tsq">["&lt;" "&gt;" "&lt;/"] @rainbow.bracket
 </code></pre>
 <p>And we capture <code>(element)</code> as <code>@rainbow.scope</code> because <code>(element)</code> nodes nest
 within each other: they increment the nesting level and switch to the next
