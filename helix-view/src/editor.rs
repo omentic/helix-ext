@@ -356,6 +356,8 @@ pub struct Config {
     pub initial_mode: Mode,
     /// User supplied digraphs for use with the `insert_diagraphs` command
     pub digraphs: DigraphStore,
+    /// Whether to render rainbow highlights. Defaults to `true`.
+    pub rainbow_brackets: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Eq, PartialOrd, Ord)]
@@ -936,6 +938,7 @@ impl Default for Config {
             explorer: ExplorerConfig::default(),
             initial_mode: Mode::Normal,
             digraphs: Default::default(),
+            rainbow_brackets: true,
         }
     }
 }
@@ -1276,8 +1279,9 @@ impl Editor {
             return;
         }
 
-        let scopes = theme.scopes();
-        (*self.syn_loader).load().set_scopes(scopes.to_vec());
+        self.syn_loader
+            .load_full()
+            .set_scopes(theme.scopes().to_vec());
 
         match preview {
             ThemeAction::Preview => {
