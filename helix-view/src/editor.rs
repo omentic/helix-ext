@@ -351,6 +351,8 @@ pub struct Config {
     pub jump_label_alphabet: Vec<char>,
     /// Explorer configuration.
     pub explorer: ExplorerConfig,
+    /// The initial mode for newly opened editors. Defaults to `"normal"`.
+    pub initial_mode: Mode,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Eq, PartialOrd, Ord)]
@@ -929,6 +931,7 @@ impl Default for Config {
             indent_heuristic: IndentationHeuristic::default(),
             jump_label_alphabet: ('a'..='z').collect(),
             explorer: ExplorerConfig::default(),
+            initial_mode: Mode::Normal,
         }
     }
 }
@@ -1504,7 +1507,8 @@ impl Editor {
             return;
         }
 
-        self.enter_normal_mode();
+        // this causes tree.rs to panic upon launch. todo: debug
+        // self.enter_normal_mode();
 
         match action {
             Action::Replace => {
@@ -1593,6 +1597,7 @@ impl Editor {
 
     /// Generate an id for a new document and register it.
     fn new_document(&mut self, mut doc: Document) -> DocumentId {
+        self.mode = self.config().initial_mode;
         let id = self.next_document_id;
         // Safety: adding 1 from 1 is fine, probably impossible to reach usize max
         self.next_document_id =
