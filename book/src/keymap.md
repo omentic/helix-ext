@@ -73,6 +73,7 @@ Normal mode is the default mode when you launch helix. You can return to it from
 | `a`         | Insert after selection (append)                                      | `append_mode`             |
 | `I`         | Insert at the start of the line                                      | `insert_at_line_start`    |
 | `A`         | Insert at the end of the line                                        | `insert_at_line_end`      |
+| `\`         | Insert digraphs                                                      | `insert_digraph`          |
 | `o`         | Open new line below selection                                        | `open_below`              |
 | `O`         | Open new line above selection                                        | `open_above`              |
 | `.`         | Repeat last insert                                                   | N/A                       |

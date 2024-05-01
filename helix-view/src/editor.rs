@@ -1,5 +1,6 @@
 use crate::{
     align_view,
+    digraph::DigraphStore,
     document::{DocumentSavedEventFuture, DocumentSavedEventResult, Mode, SavePoint},
     graphics::{CursorKind, Rect},
     handlers::Handlers,
@@ -353,6 +354,8 @@ pub struct Config {
     pub explorer: ExplorerConfig,
     /// The initial mode for newly opened editors. Defaults to `"normal"`.
     pub initial_mode: Mode,
+    /// User supplied digraphs for use with the `insert_diagraphs` command
+    pub digraphs: DigraphStore,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Eq, PartialOrd, Ord)]
@@ -932,6 +935,7 @@ impl Default for Config {
             jump_label_alphabet: ('a'..='z').collect(),
             explorer: ExplorerConfig::default(),
             initial_mode: Mode::Normal,
+            digraphs: Default::default(),
         }
     }
 }
