@@ -58,7 +58,7 @@ pulldown-cmark = { version = "0.10", default-features = false }
 content_inspector = "0.2.4"
 
 # opening URLs
-open = "5.1.2"
+open = "5.1.3"
 url = "2.5.0"
 
 # config
