@@ -24,4 +24,4 @@ thiserror = "1.0"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "io-util", "io-std", "time", "process", "macros", "fs", "parking_lot", "net", "sync"] }
 
 [dev-dependencies]
-fern = "0.6"
+fern = "0.7"
