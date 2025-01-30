@@ -110,6 +110,24 @@ Special keys are encoded as follows:
 
 Keys can be disabled by binding them to the `no_op` command.
 
+To remove all default bindings, `unbind-default-keys = true` can be added to the top level configuration.
+
+```toml
+unbind-default-keys = true
+
+# Only these normal mode bindings will be used
+[keys.normal]
+n = "normal_mode"
+t = "goto_definition"
+
+# remember to add bindings to return to normal mode
+[keys.select]
+esc = "normal_mode"
+
+[keys.insert]
+esc = "normal_mode"
+```
+
 All other keys such as `?`, `!`, `-` etc. can be used literally:
 
 ```toml
