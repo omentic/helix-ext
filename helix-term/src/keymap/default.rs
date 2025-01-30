@@ -186,6 +186,8 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
         "C-f" | "pagedown" => page_down,
         "C-u" => page_cursor_half_up,
         "C-d" => page_cursor_half_down,
+        "C-k" => move_selection_above,
+        "C-j" => move_selection_below,
 
         "C-w" => { "Window"
             "C-w" | "w" => rotate_view,
