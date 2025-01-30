@@ -362,6 +362,8 @@ pub struct Config {
     pub clipboard_provider: ClipboardProvider,
     /// The initial mode for newly opened editors. Defaults to `"normal"`.
     pub initial_mode: Mode,
+    /// Whether to render rainbow highlights. Defaults to `false`.
+    pub rainbow_brackets: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Eq, PartialOrd, Ord)]
@@ -1004,6 +1006,7 @@ impl Default for Config {
             end_of_line_diagnostics: DiagnosticFilter::Disable,
             clipboard_provider: ClipboardProvider::default(),
             initial_mode: Mode::Normal,
+            rainbow_brackets: true,
         }
     }
 }
