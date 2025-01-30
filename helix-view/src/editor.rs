@@ -881,12 +881,22 @@ impl Default for WhitespaceCharacters {
     }
 }
 
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RainbowIndent {
+    #[default]
+    None,
+    Dim,
+    Bright,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct IndentGuidesConfig {
     pub render: bool,
     pub character: char,
     pub skip_levels: u8,
+    pub rainbow_indentation: RainbowIndent,
 }
 
 impl Default for IndentGuidesConfig {
@@ -895,6 +905,7 @@ impl Default for IndentGuidesConfig {
             skip_levels: 0,
             render: false,
             character: '│',
+            rainbow_indentation: RainbowIndent::default(),
         }
     }
 }
