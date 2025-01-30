@@ -360,6 +360,8 @@ pub struct Config {
     pub end_of_line_diagnostics: DiagnosticFilter,
     // Set to override the default clipboard provider
     pub clipboard_provider: ClipboardProvider,
+    /// The initial mode for newly opened editors. Defaults to `"normal"`.
+    pub initial_mode: Mode,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Eq, PartialOrd, Ord)]
@@ -1001,6 +1003,7 @@ impl Default for Config {
             inline_diagnostics: InlineDiagnosticsConfig::default(),
             end_of_line_diagnostics: DiagnosticFilter::Disable,
             clipboard_provider: ClipboardProvider::default(),
+            initial_mode: Mode::Normal,
         }
     }
 }
@@ -1589,10 +1592,6 @@ impl Editor {
             return;
         }
 
-        if !matches!(action, Action::Load) {
-            self.enter_normal_mode();
-        }
-
         let focust_lost = match action {
             Action::Replace => {
                 let (view, doc) = current_ref!(self);
@@ -1692,6 +1691,7 @@ impl Editor {
 
     /// Generate an id for a new document and register it.
     fn new_document(&mut self, mut doc: Document) -> DocumentId {
+        self.mode = self.config().initial_mode;
         let id = self.next_document_id;
         // Safety: adding 1 from 1 is fine, probably impossible to reach usize max
         self.next_document_id =
