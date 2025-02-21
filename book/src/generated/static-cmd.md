@@ -151,6 +151,11 @@
 | `goto_prev_change` | Goto previous change | normal: `` [g ``, select: `` [g `` |
 | `goto_first_change` | Goto first change | normal: `` [G ``, select: `` [G `` |
 | `goto_last_change` | Goto last change | normal: `` ]G ``, select: `` ]G `` |
+| `grow_buffer_width` | Grow focused container width | normal: `` <A-W>l ``, `` <A-w>l ``, `` <A-w><A-l> ``, `` <A-W><right> ``, `` <A-w><right> ``, `` <A-w><A-right> ``, select: `` <A-W>l ``, `` <A-w>l ``, `` <A-w><A-l> ``, `` <A-W><right> ``, `` <A-w><right> ``, `` <A-w><A-right> `` |
+| `shrink_buffer_width` | Shrink focused container width | normal: `` <A-W>h ``, `` <A-w>h ``, `` <A-w><A-h> ``, `` <A-W><left> ``, `` <A-w><left> ``, `` <A-w><A-left> ``, select: `` <A-W>h ``, `` <A-w>h ``, `` <A-w><A-h> ``, `` <A-W><left> ``, `` <A-w><left> ``, `` <A-w><A-left> `` |
+| `grow_buffer_height` | Grow focused container height | normal: `` <A-W>k ``, `` <A-w>k ``, `` <A-W><up> ``, `` <A-w><up> ``, `` <A-w><A-k> ``, `` <A-w><A-up> ``, select: `` <A-W>k ``, `` <A-w>k ``, `` <A-W><up> ``, `` <A-w><up> ``, `` <A-w><A-k> ``, `` <A-w><A-up> `` |
+| `shrink_buffer_height` | Shrink focused container height | normal: `` <A-W>j ``, `` <A-w>j ``, `` <A-w><A-j> ``, `` <A-W><down> ``, `` <A-w><down> ``, `` <A-w><A-down> ``, select: `` <A-W>j ``, `` <A-w>j ``, `` <A-w><A-j> ``, `` <A-W><down> ``, `` <A-w><down> ``, `` <A-w><A-down> `` |
+| `toggle_focus_window` | Toggle focus mode on buffer | normal: `` <A-W>f ``, `` <A-w><A-f> ``, select: `` <A-W>f ``, `` <A-w><A-f> `` |
 | `goto_line_start` | Goto line start | normal: `` gh ``, `` <home> ``, select: `` gh ``, insert: `` <home> `` |
 | `goto_line_end` | Goto line end | normal: `` gl ``, `` <end> ``, select: `` gl `` |
 | `goto_next_buffer` | Goto next buffer | normal: `` gn ``, select: `` gn `` |
