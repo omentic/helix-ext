@@ -18,7 +18,7 @@ pub mod theme;
 pub mod tree;
 pub mod view;
 
-use std::num::NonZeroUsize;
+use std::num::{NonZeroUsize, ParseIntError};
 
 // uses NonZeroUsize so Option<DocumentId> use a byte rather than two
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -28,6 +28,22 @@ impl Default for DocumentId {
     fn default() -> DocumentId {
         // Safety: 1 is non-zero
         DocumentId(unsafe { NonZeroUsize::new_unchecked(1) })
+    }
+}
+
+impl TryFrom<&str> for DocumentId {
+    type Error = ParseIntError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(Self(value.parse::<NonZeroUsize>()?))
+    }
+}
+
+impl TryFrom<String> for DocumentId {
+    type Error = ParseIntError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Ok(Self(value.parse::<NonZeroUsize>()?))
     }
 }
 
